@@ -1,5 +1,5 @@
 // import.js: paste JSON, validate, preview, skip duplicates, save.
-import { h, topbar, toast, loading } from './ui.js';
+import { h, topbar, toast, loading, emptyState } from './ui.js';
 import * as db from './db.js';
 
 const stats0 = () => ({ seen: 0, correct: 0, streak: 0, lastResult: null, lastSeenAt: null });
@@ -94,7 +94,7 @@ export function parseImport(raw) {
 // ---------- screen ----------
 export async function importScreen() {
   const courses = await db.listCourses();
-  if (!courses.length) return h('div', {}, topbar('Import'), h('div', { class: 'empty' }, 'Create a course first, then come back to import.', h('br'), h('a', { href: '#/' }, 'Go to Courses')));
+  if (!courses.length) return h('div', {}, topbar('Import'), emptyState('courses', 'Create a course first, then come back to import.', h('a', { class: 'btn primary', href: '#/' }, 'Go to Courses')));
 
   let chapters = [], prev = null, touched = false, mode = 'append';
   const pre = sessionStorage.getItem('importCourse'); sessionStorage.removeItem('importCourse');

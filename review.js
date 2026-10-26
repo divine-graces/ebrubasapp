@@ -1,5 +1,5 @@
 // review.js: one-at-a-time queue of pending questions and flashcards.
-import { h, topbar, toast, confirmDialog, renderMd } from './ui.js';
+import { h, topbar, toast, confirmDialog, renderMd, emptyState, icon } from './ui.js';
 import * as db from './db.js';
 
 const md = (text, cls = '', inline = false) => { const d = h('div', { class: 'md ' + cls }); renderMd(d, text, inline); return d; };
@@ -19,13 +19,14 @@ export async function reviewOverview(courseId) {
       ? list.map(c => h('a', { class: 'card flex tap', href: '#/review/' + c.id },
           h('div', { class: 'grow' }, h('div', { class: 'title' }, c.name),
             h('div', { class: 'muted small' }, `${cName[c.courseId] || ''} · ${by[c.id].q} questions, ${by[c.id].c} cards`)),
-          h('span', { class: 'badge' }, by[c.id].q + by[c.id].c)))
-      : h('div', { class: 'empty' }, 'Nothing is waiting for review.'));
+          h('span', { class: 'badge' }, by[c.id].q + by[c.id].c),
+          h('span', { class: 'chev' }, icon('next', 18))))
+      : emptyState('check', 'Nothing is waiting for review.'));
 }
 
 export async function reviewQueue(chapterId) {
   const ch = await db.getChapter(chapterId);
-  if (!ch) return h('div', {}, topbar('Review', { back: '#/' }), h('div', { class: 'empty' }, 'This chapter no longer exists.'));
+  if (!ch) return h('div', {}, topbar('Review', { back: '#/' }), emptyState('inbox', 'This chapter no longer exists.'));
   const p = await db.listPending(chapterId);
   const items = [
     ...p.questions.sort((a, b) => (a.type === 'mcq' ? 0 : 1) - (b.type === 'mcq' ? 0 : 1)).map(x => ({ ...x, kind: 'questions' })),
@@ -104,7 +105,7 @@ export async function reviewQueue(chapterId) {
 
   function draw(editing = false) {
     if (!items.length) {
-      box.replaceChildren(h('div', { class: 'card' }, h('h2', {}, total ? 'All reviewed ✓' : 'Nothing to review'),
+      box.replaceChildren(h('div', { class: 'card' }, emptyState('check', total ? 'All reviewed. Nice work.' : 'Nothing to review in this chapter.'),
         h('a', { class: 'btn primary block', href: '#/chapter/' + chapterId }, 'Open chapter')));
       return;
     }

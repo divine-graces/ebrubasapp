@@ -1,14 +1,20 @@
 // app.js: entry point. Auth gate, hash router, Courses / Course / Chapter screens.
 import { onUser, logout, renderLogin } from './auth.js';
 import * as db from './db.js';
-import { h, $, topbar, menuButton, toast, confirmDialog, formModal, renderMd, loading, setSync, go } from './ui.js';
+import { h, $, topbar, menuButton, toast, confirmDialog, formModal, renderMd, loading, setSync, go, icon, emptyState } from './ui.js';
 import { importScreen } from './import.js';
 import { reviewOverview, reviewQueue } from './review.js';
 
 const view = $('#view');
 let navId = 0, signedIn = false;
 
-const show = (live, ...nodes) => { if (live()) { view.replaceChildren(...nodes); window.scrollTo(0, 0); } };
+// Screens pass arrays (courses.map(...)) and null (conditional banners). replaceChildren would turn
+// those into the text "null" / "[object HTMLDivElement]", so flatten and drop empties first.
+const show = (live, ...nodes) => {
+  if (!live()) return;
+  view.replaceChildren(...nodes.flat(Infinity).filter(n => n != null && n !== false));
+  window.scrollTo(0, 0);
+};
 const tally = (arr, key) => arr.reduce((m, x) => { m[x[key]] = (m[x[key]] || 0) + 1; return m; }, {});
 const safe = fn => async (...a) => { try { await fn(...a); } catch (e) { console.error(e); toast('Something went wrong: ' + (e.message || e), 4500); } };
 const soon = msg => () => toast(msg);
@@ -27,8 +33,8 @@ async function route() {
     else if (a === 'chapter') await chapterScreen(b, live);
     else if (a === 'import') show(live, await importScreen());
     else if (a === 'review') show(live, b === 'c' ? await reviewOverview(c) : b ? await reviewQueue(b) : await reviewOverview());
-    else if (a === 'study') show(live, topbar('Study'), h('div', { class: 'empty' }, 'MCQ tests arrive in Phase 2, flashcards in Phase 3, theory tests in Phase 4.'));
-    else if (a === 'stats') show(live, topbar('Stats'), h('div', { class: 'empty' }, 'Stats arrive in Phase 2.'));
+    else if (a === 'study') show(live, topbar('Study'), emptyState('study', 'MCQ tests arrive in Phase 2, flashcards in Phase 3, theory tests in Phase 4.'));
+    else if (a === 'stats') show(live, topbar('Stats'), emptyState('stats', 'Stats arrive in Phase 2.'));
     else go('/');
   } catch (e) {
     console.error(e);
@@ -69,23 +75,24 @@ async function coursesScreen(live) {
   });
 
   show(live,
-    topbar('Courses', { right: h('button', { class: 'icon-btn', 'aria-label': 'Sign out', onclick: () => confirmDialog('Sign out?', 'Sign out', false).then(ok => ok && logout()) }, '⎋') }),
+    topbar('Courses', { right: h('button', { class: 'icon-btn', 'aria-label': 'Sign out', onclick: () => confirmDialog('Sign out?', 'Sign out', false).then(ok => ok && logout()) }, icon('logout', 22)) }),
     total ? h('a', { class: 'card flex tap', href: '#/review' }, h('div', { class: 'grow' }, 'Items waiting for review'), h('span', { class: 'badge' }, total)) : null,
     courses.length
       ? courses.map(c => h('div', { class: 'card flex tap', onclick: () => go('/course/' + c.id) },
+          h('div', { class: 'tile' }, icon('courses', 20)),
           h('div', { class: 'grow' },
             h('div', { class: 'title' }, c.name),
             h('div', { class: 'muted small' }, [c.code, `${chCount[c.id] || 0} chapters`].filter(Boolean).join(' · '))),
           pCount[c.id] ? h('a', { class: 'badge', href: '#/review/c/' + c.id, onclick: e => e.stopPropagation() }, pCount[c.id] + ' to review') : null,
           menuButton([{ label: 'Rename', onclick: () => rename(c) }, { label: 'Delete', danger: true, onclick: () => remove(c) }])))
-      : h('div', { class: 'empty' }, 'No courses yet. Tap + to add your first one.'),
-    h('button', { class: 'fab', 'aria-label': 'Add course', onclick: addCourse }, '+'));
+      : emptyState('courses', 'No courses yet. Tap the plus button to add your first one.'),
+    h('button', { class: 'fab', 'aria-label': 'Add course', onclick: addCourse }, icon('plus', 28)));
 }
 
 // ---------- Course page ----------
 async function courseScreen(courseId, live) {
   const [course, chapters, qs, cards] = await Promise.all([db.getCourse(courseId), db.listChapters(courseId), db.listQuestions(courseId), db.listCards(courseId)]);
-  if (!course) return show(live, topbar('Not found', { back: '#/' }), h('div', { class: 'empty' }, 'This course no longer exists.'));
+  if (!course) return show(live, topbar('Not found', { back: '#/' }), emptyState('inbox', 'This course no longer exists.'));
   const st = {};
   const S = id => (st[id] ||= { mcq: 0, theory: 0, cards: 0, pending: 0 });
   qs.forEach(q => { const s = S(q.chapterId); if (q.status === 'pending') s.pending++; else s[q.type]++; });
@@ -106,16 +113,17 @@ async function courseScreen(courseId, live) {
             h('div', { class: 'grow' },
               h('div', { class: 'title' }, c.name),
               h('div', { class: 'muted small' }, `Note ${c.noteBody ? 'yes' : 'no'} · ${s.mcq} MCQ · ${s.theory} theory · ${s.cards} cards`)),
-            s.pending ? h('span', { class: 'badge' }, s.pending + ' pending') : null);
+            s.pending ? h('span', { class: 'badge' }, s.pending + ' pending') : null,
+            h('span', { class: 'chev' }, icon('next', 18)));
         })
-      : h('div', { class: 'empty' }, 'No chapters yet. Import a note to create the first one.'),
+      : emptyState('layers', 'No chapters yet. Import a note to create the first one.'),
     h('button', { class: 'btn primary block', onclick: () => { sessionStorage.setItem('importCourse', courseId); go('/import'); } }, 'Import into this course'));
 }
 
 // ---------- Chapter page ----------
 async function chapterScreen(id, live) {
   const ch = await db.getChapter(id);
-  if (!ch) return show(live, topbar('Not found', { back: '#/' }), h('div', { class: 'empty' }, 'This chapter no longer exists.'));
+  if (!ch) return show(live, topbar('Not found', { back: '#/' }), emptyState('inbox', 'This chapter no longer exists.'));
   const p = await db.listPending(id);
   const pend = p.questions.length + p.cards.length;
 
@@ -144,7 +152,7 @@ async function chapterScreen(id, live) {
 
   const note = h('div', { class: 'card md' });
   if (ch.noteBody) renderMd(note, ch.noteBody);
-  else note.append(h('span', { class: 'muted' }, 'No note yet. Import one into this chapter.'));
+  else note.append(emptyState('file', 'No note yet. Import one into this chapter.'));
 
   show(live,
     topbar(ch.name, { back: '#/course/' + ch.courseId, right: menuButton([

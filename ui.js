@@ -21,9 +21,34 @@ export function h(tag, props, ...kids) {
 
 export const loading = () => h('div', { class: 'loading' }, h('div', { class: 'spin' }));
 
+// ---------- icons (Lucide/Feather style: 24px grid, 2px round strokes, colour from currentColor) ----------
+const ICONS = {
+  courses: '<path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/>',
+  study: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  import: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  stats: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
+  back: '<polyline points="15 18 9 12 15 6"/>',
+  next: '<polyline points="9 18 15 12 9 6"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  more: '<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>'
+};
+// Static strings only, never user data, so parsing them as HTML is safe.
+export function icon(name, size = 22) {
+  const t = document.createElement('template');
+  t.innerHTML = `<svg class="ico" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+  return t.content.firstChild;
+}
+export const emptyState = (name, text, action) =>
+  h('div', { class: 'empty' }, h('div', { class: 'empty-art' }, icon(name, 38)), h('p', {}, text), action || null);
+
 export const topbar = (title, { back, right } = {}) =>
   h('div', { class: 'topbar' },
-    back ? h('a', { class: 'icon-btn', href: back, 'aria-label': 'Back' }, '←') : null,
+    back ? h('a', { class: 'icon-btn', href: back, 'aria-label': 'Back' }, icon('back', 24)) : null,
     h('h1', {}, title), right || null);
 
 // ---------- toasts, dialogs, menus ----------
@@ -81,7 +106,7 @@ export function menuButton(items) {
     const open = list.hidden;
     document.querySelectorAll('.menu-list').forEach(l => { l.hidden = true; });
     list.hidden = !open;
-  } }, '⋮');
+  } }, icon('more', 22));
   return h('div', { class: 'menu', onclick: e => e.stopPropagation() }, btn, list);
 }
 document.addEventListener('click', () => document.querySelectorAll('.menu-list').forEach(l => { l.hidden = true; }));
