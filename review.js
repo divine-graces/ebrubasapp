@@ -112,7 +112,7 @@ export async function reviewQueue(chapterId) {
     box.replaceChildren(
       h('div', { class: 'muted small' }, `${done + 1} of ${total}`),
       h('div', { class: 'progress' }, h('div', { style: `width:${(done / total) * 100}%` })),
-      editing ? edit(items[0]) : view(items[0]));
+      ...(editing ? edit(items[0]) : view(items[0])));
   }
 
   draw();
