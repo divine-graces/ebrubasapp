@@ -1,7 +1,7 @@
 // db.js: all Firestore access. Everything lives under users/{uid}/.
 import { db } from './firebase.js';
 import {
-  collection, doc, getDoc, getDocs, updateDoc, deleteDoc, setDoc,
+  collection, doc, getDoc, getDocs, updateDoc, deleteDoc, setDoc, increment,
   query, where, writeBatch, waitForPendingWrites, documentId
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
@@ -95,6 +95,19 @@ export async function saveImport(chapterId, chapterData, items) {
   }
   await soft(Promise.all(jobs));
 }
+
+// ---------- tests ----------
+// seen+1, correct+1 if right, streak+1 if right else 0, lastResult, lastSeenAt.
+// increment() is applied on the server side, so it stays correct even if the local copy is stale or offline.
+export const recordAnswer = (id, right) => soft(updateDoc(ref('questions', id), {
+  'stats.seen': increment(1),
+  'stats.correct': increment(right ? 1 : 0),
+  'stats.streak': right ? increment(1) : 0,
+  'stats.lastResult': right ? 'right' : 'wrong',
+  'stats.lastSeenAt': Date.now()
+}));
+// attempt: {courseId, chapterIds[], type, date, score, total, results[{questionId, correct, chosenIndex}]}
+export const saveAttempt = a => soft(setDoc(doc(col('attempts')), a));
 
 // ---------- cascade deletes (Firestore does not do this for us) ----------
 async function deleteWhere(name, field, value) {

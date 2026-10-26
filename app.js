@@ -4,6 +4,8 @@ import * as db from './db.js';
 import { h, $, topbar, menuButton, toast, confirmDialog, formModal, renderMd, loading, setSync, go, icon, emptyState } from './ui.js';
 import { importScreen } from './import.js';
 import { reviewOverview, reviewQueue } from './review.js';
+import { testSetupScreen, quizScreen } from './quiz.js';
+import { statsScreen } from './stats.js';
 
 const view = $('#view');
 let navId = 0, signedIn = false;
@@ -24,7 +26,7 @@ async function route() {
   if (!signedIn) return;
   const id = ++navId, live = () => id === navId;
   const [a, b, c] = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  const active = ['import', 'study', 'stats'].includes(a) ? a : a === 'review' ? '' : 'courses';
+  const active = ['import', 'stats'].includes(a) ? a : ['study', 'test', 'quiz'].includes(a) ? 'study' : a === 'review' ? '' : 'courses';
   document.querySelectorAll('#nav a').forEach(x => x.classList.toggle('on', x.dataset.r === active));
   view.replaceChildren(loading());
   try {
@@ -33,8 +35,9 @@ async function route() {
     else if (a === 'chapter') await chapterScreen(b, live);
     else if (a === 'import') show(live, await importScreen());
     else if (a === 'review') show(live, b === 'c' ? await reviewOverview(c) : b ? await reviewQueue(b) : await reviewOverview());
-    else if (a === 'study') show(live, topbar('Study'), emptyState('study', 'MCQ tests arrive in Phase 2, flashcards in Phase 3, theory tests in Phase 4.'));
-    else if (a === 'stats') show(live, topbar('Stats'), emptyState('stats', 'Stats arrive in Phase 2.'));
+    else if (a === 'study' || a === 'test') show(live, await testSetupScreen(b === 'course' ? { courseId: c } : b === 'chapter' ? { chapterId: c } : {}));
+    else if (a === 'quiz') show(live, quizScreen());
+    else if (a === 'stats') show(live, await statsScreen());
     else go('/');
   } catch (e) {
     console.error(e);
@@ -102,7 +105,7 @@ async function courseScreen(courseId, live) {
   show(live,
     topbar(course.name, { back: '#/' }),
     h('div', { class: 'grid3' },
-      h('button', { class: 'btn', onclick: soon('Tests arrive in Phase 2') }, 'Take test'),
+      h('button', { class: 'btn', onclick: () => go('/test/course/' + courseId) }, 'Take test'),
       h('button', { class: 'btn', onclick: soon('Flashcards arrive in Phase 3') }, 'Flashcards'),
       h('button', { class: 'btn', onclick: soon('Finals mode arrives in Phase 4') }, 'Finals mode')),
     pend ? h('a', { class: 'card flex tap', href: '#/review/c/' + courseId }, h('div', { class: 'grow' }, 'Items waiting for review'), h('span', { class: 'badge' }, pend)) : null,
@@ -158,7 +161,7 @@ async function chapterScreen(id, live) {
     topbar(ch.name, { back: '#/course/' + ch.courseId, right: menuButton([
       { label: 'Edit note', onclick: editNote }, { label: 'Rename', onclick: rename }, { label: 'Delete chapter', danger: true, onclick: remove }]) }),
     pend ? h('a', { class: 'card flex tap', href: '#/review/' + id }, h('div', { class: 'grow' }, 'Items waiting for review'), h('span', { class: 'badge' }, pend)) : null,
-    h('button', { class: 'btn primary block', onclick: soon('Studying arrives in Phase 2') }, 'Study this chapter'),
+    h('button', { class: 'btn primary block', onclick: () => go('/test/chapter/' + id) }, 'Study this chapter'),
     note);
 }
 
