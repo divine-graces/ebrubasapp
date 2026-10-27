@@ -4,6 +4,14 @@ import * as db from './db.js';
 
 const stats0 = () => ({ seen: 0, correct: 0, streak: 0, lastResult: null, lastSeenAt: null });
 
+// What to write to a chapter's noteBody for this import. Returns {noteBody, dupe}; noteBody is null when nothing should be written.
+// Append (default) adds to the old note, Replace overwrites it, and the same note imported twice is skipped.
+function planNote(old, body, mode) {
+  if (mode === 'replace' || !old.trim()) return { noteBody: body, dupe: false };
+  if (old.includes(body.trim())) return { noteBody: null, dupe: true };
+  return { noteBody: old.trimEnd() + '\n\n' + body, dupe: false };
+}
+
 // ---------- parsing + validation ----------
 function locate(raw, pos) {
   const line = raw.slice(0, pos).split('\n').length;
@@ -182,6 +190,14 @@ export async function importScreen() {
       if (existing) { name = existing.name || '(unnamed chapter)'; key = keyOf(existing); }
       const chapterId = existing ? existing.id : await db.chapterIdFor(courseId, key);
 
+      // New-chapter ids are a hash of the ORIGINAL name. If that chapter was renamed later, the old name hashes to the
+      // renamed chapter's id: it already exists, so merge into it instead of creating (and overwriting) it.
+      let renamed = false;
+      if (!existing) {
+        const hit = await db.getChapter(chapterId);
+        if (hit) { existing = hit; name = hit.name || '(unnamed chapter)'; key = keyOf(hit); renamed = true; }
+      }
+
       // build items, skipping duplicates inside the file and against what is already saved
       const items = [], seen = new Set(); let dupes = 0;
       const add = async (c, text, data) => {
@@ -200,14 +216,13 @@ export async function importScreen() {
 
       let noteBody = null;
       if (d.note) {
-        const body = d.note.body, old = existing?.noteBody || '';
-        if (mode === 'replace' || !old.trim()) noteBody = body;
-        else if (old.includes(body.trim())) dupes++; // same note imported twice
-        else noteBody = old.trimEnd() + '\n\n' + body;
+        const plan = planNote(existing?.noteBody || '', d.note.body, mode);
+        noteBody = plan.noteBody;
+        if (plan.dupe) dupes++; // same note imported twice
         if (noteBody && noteBody.length > 900000) return showErr(['The combined note would be too large for one chapter. Import it as a separate chapter part.']);
       }
 
-      prev = { courseId, chapterId, existing, name, key, noteBody, items: fresh, order: chapters.length };
+      prev = { courseId, chapterId, existing, name, key, noteBody, rawNote: d.note ? d.note.body : null, items: fresh, order: chapters.length };
       const n = t => fresh.filter(i => i.data.type === t).length;
       const parts = [];
       if (noteBody != null) parts.push('1 note');
@@ -224,7 +239,8 @@ export async function importScreen() {
       const saveBtn = h('button', { class: 'btn primary block', onclick: save }, 'Save');
       out.replaceChildren(h('div', { class: 'card' },
         h('div', { class: 'muted small' }, `Chapter: ${name} (${existing ? 'existing' : 'new'})`),
-        key !== db.norm(d.chapter) ? h('div', { class: 'small', style: 'color:var(--warn)' }, `Heads up: the file says chapter "${d.chapter}", but you are importing into "${name}".`) : null,
+        renamed ? h('div', { class: 'small', style: 'color:var(--warn)' }, `A chapter you renamed to '${name}' already uses this name. Importing into it.`) : null,
+        !renamed && key !== db.norm(d.chapter) ? h('div', { class: 'small', style: 'color:var(--warn)' }, `Heads up: the file says chapter "${d.chapter}", but you are importing into "${name}".`) : null,
         h('p', { class: 'title' }, nothing ? 'Nothing new to save. ' + parts.join(', ') : parts.join(', ')),
         nothing ? null : [status, saveBtn]));
     } catch (e) { console.error(e); showErr(['Something went wrong: ' + (e.message || e)]); }
@@ -237,20 +253,28 @@ export async function importScreen() {
     try {
       const p = prev, now = Date.now(), status = verified.checked ? 'approved' : 'pending';
       const docs = p.items.map(i => ({ ...i, data: { ...i.data, status, createdAt: now, ...(i.col === 'flashcards' ? { srs: { ...i.data.srs, dueAt: now } } : {}) } }));
-      const chapterData = p.existing
-        ? { updatedAt: now, ...(p.noteBody != null ? { noteBody: p.noteBody } : {}) }
-        : { courseId: p.courseId, name: p.name, nameKey: p.key, order: p.order, noteBody: p.noteBody ?? '', createdAt: now, updatedAt: now };
+      // Last check before treating the chapter as new: it may exist by now (renamed, or created on another device
+      // since the preview). If so, merge into it and leave its name, nameKey and noteBody alone.
+      let existing = p.existing, noteBody = p.noteBody;
+      if (!existing) {
+        const hit = await db.getChapter(p.chapterId);
+        if (hit) { existing = hit; noteBody = p.rawNote != null ? planNote(hit.noteBody || '', p.rawNote, mode).noteBody : null; }
+      }
+      const nm = existing ? existing.name || '(unnamed chapter)' : p.name;
+      const chapterData = existing
+        ? { updatedAt: now, ...(noteBody != null ? { noteBody } : {}) } // noteBody only when the import brings a note
+        : { courseId: p.courseId, name: p.name, nameKey: p.key, order: p.order, noteBody: noteBody ?? '', createdAt: now, updatedAt: now };
       await db.saveImport(p.chapterId, chapterData, docs);
 
       paste.value = ''; verified.checked = false; touched = false; prev = null; // the verified box never carries over
       await loadChaps(p.chapterId);
       if (courseSel.value === p.courseId && !chapters.some(c => c.id === p.chapterId)) {
         // the list read did not include the chapter yet (slow sync): show it from what we just saved
-        chapters.push({ id: p.chapterId, courseId: p.courseId, name: p.name, nameKey: p.key, noteBody: p.noteBody ?? p.existing?.noteBody ?? '', order: p.order });
+        chapters.push({ id: p.chapterId, courseId: p.courseId, name: nm, nameKey: existing ? keyOf(existing) : p.key, noteBody: noteBody ?? existing?.noteBody ?? '', order: p.order });
         fillChaps(p.chapterId);
       }
       out.replaceChildren(h('div', { class: 'card' },
-        h('p', { class: 'ok title' }, `Saved to ${p.name} as ${status}.`),
+        h('p', { class: 'ok title' }, `Saved to ${nm} as ${status}.`),
         h('div', { class: 'row' },
           docs.length && status === 'pending' ? h('a', { class: 'btn primary', href: '#/review/' + p.chapterId }, `Review ${docs.length}`) : null,
           h('a', { class: 'btn', href: '#/chapter/' + p.chapterId }, 'Open chapter'))));
