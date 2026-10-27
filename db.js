@@ -122,6 +122,9 @@ export const recordTheory = (id, rating) => soft(updateDoc(ref('questions', id),
   'stats.lastResult': rating === 'got' ? 'right' : rating === 'partial' ? 'partial' : 'wrong',
   'stats.lastSeenAt': Date.now()
 }));
+// newest first
+export const listAttempts = async courseId =>
+  rows(await getDocs(query(col('attempts'), where('courseId', '==', courseId)))).sort((a, b) => (b.date || 0) - (a.date || 0));
 // attempt: {courseId, chapterIds[], type, date, score, total, results[{questionId, correct, chosenIndex}]}
 // (theory attempts store results[{questionId, correct, rating}] instead of chosenIndex)
 export const saveAttempt = a => soft(setDoc(doc(col('attempts')), a));

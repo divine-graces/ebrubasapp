@@ -6,6 +6,13 @@
 <meta name="color-scheme" content="light">
 <meta name="theme-color" content="#f6f7f9">
 <title>Study</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Study">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <link rel="stylesheet" href="styles.css">
 <!-- Classic scripts load first, so the globals exist before the ES modules run -->
@@ -38,5 +45,9 @@
 </div>
 <div id="overlay"></div>
 <div id="toasts"></div>
+<script>
+  // offline support for the app files (see sw.js)
+  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(e => console.warn('Service worker not registered', e)));
+</script>
 </body>
 </html>

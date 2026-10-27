@@ -5,7 +5,7 @@ import * as db from './db.js';
 const band = pct => pct >= 80 ? 'hi' : pct >= 50 ? 'mid' : 'lo';
 
 async function courseStats(courseId) {
-  const [chapters, qs, allCards] = await Promise.all([db.listChapters(courseId), db.listQuestions(courseId), db.listCards(courseId)]);
+  const [chapters, qs, allCards, attempts] = await Promise.all([db.listChapters(courseId), db.listQuestions(courseId), db.listCards(courseId), db.listAttempts(courseId)]);
   const approved = qs.filter(q => q.status === 'approved');
   const cards = allCards.filter(c => c.status === 'approved');
   const rows = chapters.map(c => {
@@ -27,6 +27,20 @@ async function courseStats(courseId) {
       h('div', { class: 'bar', style: `height:${n ? Math.max(4, Math.round((n / maxBox) * 70)) : 3}px;${n ? '' : 'opacity:.25'}` }),
       h('span', {}, i === 0 ? 'New' : 'Box ' + i))))) : null;
 
+  // score history: the last 10 finished tests, newest first
+  const recent = attempts.filter(a => a.total > 0).slice(0, 10);
+  const when = t => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const histCard = recent.length ? h('div', { class: 'card' },
+    h('div', { class: 'muted small' }, 'Test history'),
+    recent.map(a => {
+      const p = Math.round((a.score / a.total) * 100);
+      return h('div', { class: 'hist' },
+        h('div', { class: 'between' },
+          h('span', {}, h('span', { class: 'chip' }, a.type === 'theory' ? 'Theory' : 'MCQ'), ' ', when(a.date)),
+          h('span', {}, h('span', { class: `pct ${band(p)}` }, p + '%'), h('span', { class: 'muted small' }, `  ${a.score}/${a.total}${a.type === 'theory' ? ' got it' : ''}`))),
+        h('div', { class: `meter ${band(p)}` }, h('div', { style: `width:${p}%` })));
+    })) : null;
+
   if (!rows.length) return [emptyState('inbox', 'No approved questions in this course yet. Import and approve some, then take a test.'), boxCard].flat(Infinity).filter(Boolean);
 
   // weakest first (lowest correct/seen); chapters you have not answered yet go last
@@ -42,6 +56,7 @@ async function courseStats(courseId) {
       h('div', { class: 'score' }, overall === null ? 'No data yet' : overall + '%'),
       h('p', { class: 'muted small' }, `${seenTotal} answer${seenTotal === 1 ? '' : 's'} so far · ${unseenTotal} of ${qTotal} questions not seen yet`),
       overall === null ? null : h('div', { class: `meter ${band(overall)}` }, h('div', { style: `width:${overall}%` }))),
+    histCard,
     boxCard,
     h('h2', { style: 'margin-top:20px' }, 'Weakest chapters first'),
     rows.map(r => h('div', { class: 'card tap', onclick: () => go('/test/chapter/' + r.c.id) },
