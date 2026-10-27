@@ -5,8 +5,9 @@ import * as db from './db.js';
 const band = pct => pct >= 80 ? 'hi' : pct >= 50 ? 'mid' : 'lo';
 
 async function courseStats(courseId) {
-  const [chapters, qs] = await Promise.all([db.listChapters(courseId), db.listQuestions(courseId)]);
+  const [chapters, qs, allCards] = await Promise.all([db.listChapters(courseId), db.listQuestions(courseId), db.listCards(courseId)]);
   const approved = qs.filter(q => q.status === 'approved');
+  const cards = allCards.filter(c => c.status === 'approved');
   const rows = chapters.map(c => {
     const own = approved.filter(q => q.chapterId === c.id);
     const seen = own.reduce((n, q) => n + (q.stats?.seen || 0), 0);
@@ -14,7 +15,19 @@ async function courseStats(courseId) {
     return { c, n: own.length, seen, correct, unseen: own.filter(q => !(q.stats?.seen > 0)).length, pct: seen ? Math.round((correct / seen) * 100) : null };
   }).filter(r => r.n > 0);
 
-  if (!rows.length) return [emptyState('inbox', 'No approved questions in this course yet. Import and approve some, then take a test.')];
+  // flashcard box distribution: cards never rated are "New", the rest sit in boxes 1 to 5
+  const dist = [0, 0, 0, 0, 0, 0];
+  cards.forEach(c => { const s = c.srs || {}; dist[s.lastResult ? Math.min(5, Math.max(1, s.box || 1)) : 0]++; });
+  const maxBox = Math.max(1, ...dist);
+  const boxCard = cards.length ? h('div', { class: 'card' },
+    h('div', { class: 'muted small' }, 'Flashcard boxes'),
+    h('div', { class: 'title' }, `${cards.length} approved card${cards.length === 1 ? '' : 's'}`),
+    h('div', { class: 'box-dist' }, dist.map((n, i) => h('div', {},
+      h('span', { class: 'n' }, String(n)),
+      h('div', { class: 'bar', style: `height:${n ? Math.max(4, Math.round((n / maxBox) * 70)) : 3}px;${n ? '' : 'opacity:.25'}` }),
+      h('span', {}, i === 0 ? 'New' : 'Box ' + i))))) : null;
+
+  if (!rows.length) return [emptyState('inbox', 'No approved questions in this course yet. Import and approve some, then take a test.'), boxCard].flat(Infinity).filter(Boolean);
 
   // weakest first (lowest correct/seen); chapters you have not answered yet go last
   rows.sort((a, b) => (a.pct === null) - (b.pct === null) || (a.pct ?? 0) - (b.pct ?? 0) || b.seen - a.seen);
@@ -29,6 +42,7 @@ async function courseStats(courseId) {
       h('div', { class: 'score' }, overall === null ? 'No data yet' : overall + '%'),
       h('p', { class: 'muted small' }, `${seenTotal} answer${seenTotal === 1 ? '' : 's'} so far · ${unseenTotal} of ${qTotal} questions not seen yet`),
       overall === null ? null : h('div', { class: `meter ${band(overall)}` }, h('div', { style: `width:${overall}%` }))),
+    boxCard,
     h('h2', { style: 'margin-top:20px' }, 'Weakest chapters first'),
     rows.map(r => h('div', { class: 'card tap', onclick: () => go('/test/chapter/' + r.c.id) },
       h('div', { class: 'between' },

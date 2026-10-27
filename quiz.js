@@ -1,5 +1,5 @@
 // quiz.js: MCQ test setup, bucket draw, test runner, result screen.
-import { h, topbar, toast, confirmDialog, renderMd, emptyState, icon, loading, go, fitMath } from './ui.js';
+import { h, topbar, toast, confirmDialog, renderMd, emptyState, icon, loading, go, fitMath, seg, studySwitch } from './ui.js';
 import * as db from './db.js';
 
 const LETTERS = 'ABCD';
@@ -35,14 +35,6 @@ const newSession = (courseId, qs, mode) => ({
   courseId, mode, qs, i: 0, answers: qs.map(() => null), finished: false, saved: false,
   chapterIds: [...new Set(qs.map(q => q.chapterId))]
 });
-
-const seg = (items, value, onPick) => {
-  const btns = items.map(([v, label, off]) => h('button', {
-    class: v === value ? 'on' : '', disabled: off,
-    onclick: () => { btns.forEach((b, i) => b.classList.toggle('on', items[i][0] === v)); onPick(v); }
-  }, label));
-  return h('div', { class: 'seg' }, ...btns);
-};
 
 // ---------- test setup ----------
 export async function testSetupScreen({ courseId, chapterId } = {}) {
@@ -133,6 +125,7 @@ export async function testSetupScreen({ courseId, chapterId } = {}) {
   return h('div', {},
     topbar('Study'),
     resumeCard,
+    studySwitch('mcq'),
     seg([['mcq', 'MCQ'], ['theory', 'Theory (Phase 4)', true]], 'mcq', () => {}),
     h('label', { class: 'field' }, h('span', {}, 'Course'), courseSel),
     seg([['chapters', 'Pick chapters'], ['course', 'Whole course']], scope, v => { scope = v; chaptersBlock.hidden = v !== 'chapters'; refresh(); }),

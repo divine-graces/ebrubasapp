@@ -6,6 +6,7 @@ import { importScreen } from './import.js';
 import { reviewOverview, reviewQueue } from './review.js';
 import { testSetupScreen, quizScreen } from './quiz.js';
 import { statsScreen } from './stats.js';
+import { flashSetupScreen, dueCountsByCourse } from './flashcards.js';
 
 const view = $('#view');
 let navId = 0, signedIn = false;
@@ -26,7 +27,7 @@ async function route() {
   if (!signedIn) return;
   const id = ++navId, live = () => id === navId;
   const [a, b, c] = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  const active = ['import', 'stats'].includes(a) ? a : ['study', 'test', 'quiz'].includes(a) ? 'study' : a === 'review' ? '' : 'courses';
+  const active = ['import', 'stats'].includes(a) ? a : ['study', 'test', 'quiz', 'flashcards'].includes(a) ? 'study' : a === 'review' ? '' : 'courses';
   document.querySelectorAll('#nav a').forEach(x => x.classList.toggle('on', x.dataset.r === active));
   view.replaceChildren(loading());
   try {
@@ -36,6 +37,7 @@ async function route() {
     else if (a === 'import') show(live, await importScreen());
     else if (a === 'review') show(live, b === 'c' ? await reviewOverview(c) : b ? await reviewQueue(b) : await reviewOverview());
     else if (a === 'study' || a === 'test') show(live, await testSetupScreen(b === 'course' ? { courseId: c } : b === 'chapter' ? { chapterId: c } : {}));
+    else if (a === 'flashcards') show(live, await flashSetupScreen(b === 'course' ? { courseId: c } : b === 'chapter' ? { chapterId: c } : {}));
     else if (a === 'quiz') show(live, quizScreen());
     else if (a === 'stats') show(live, await statsScreen());
     else go('/');
@@ -48,8 +50,9 @@ async function route() {
 
 // ---------- Courses (home) ----------
 async function coursesScreen(live) {
-  const [courses, chapters, pend] = await Promise.all([db.listCourses(), db.listAllChapters(), db.listPendingAll()]);
+  const [courses, chapters, pend, approvedCards] = await Promise.all([db.listCourses(), db.listAllChapters(), db.listPendingAll(), db.listApprovedCards()]);
   const chCount = tally(chapters, 'courseId');
+  const due = dueCountsByCourse(approvedCards);
   const pCount = tally([...pend.questions, ...pend.cards], 'courseId');
   const total = pend.questions.length + pend.cards.length;
 
@@ -86,6 +89,7 @@ async function coursesScreen(live) {
           h('div', { class: 'grow' },
             h('div', { class: 'title' }, c.name),
             h('div', { class: 'muted small' }, [c.code, `${chCount[c.id] || 0} chapters`].filter(Boolean).join(' · '))),
+          due[c.id] ? h('a', { class: 'due-badge', href: '#/flashcards/course/' + c.id, onclick: e => e.stopPropagation() }, due[c.id] + ' due') : null,
           pCount[c.id] ? h('a', { class: 'badge', href: '#/review/c/' + c.id, onclick: e => e.stopPropagation() }, pCount[c.id] + ' to review') : null,
           menuButton([{ label: 'Rename', onclick: () => rename(c) }, { label: 'Delete', danger: true, onclick: () => remove(c) }])))
       : emptyState('courses', 'No courses yet. Tap the plus button to add your first one.'),
@@ -106,7 +110,7 @@ async function courseScreen(courseId, live) {
     topbar(course.name, { back: '#/' }),
     h('div', { class: 'grid3' },
       h('button', { class: 'btn', onclick: () => go('/test/course/' + courseId) }, 'Take test'),
-      h('button', { class: 'btn', onclick: soon('Flashcards arrive in Phase 3') }, 'Flashcards'),
+      h('button', { class: 'btn', onclick: () => go('/flashcards/course/' + courseId) }, 'Flashcards'),
       h('button', { class: 'btn', onclick: soon('Finals mode arrives in Phase 4') }, 'Finals mode')),
     pend ? h('a', { class: 'card flex tap', href: '#/review/c/' + courseId }, h('div', { class: 'grow' }, 'Items waiting for review'), h('span', { class: 'badge' }, pend)) : null,
     chapters.length
@@ -161,7 +165,9 @@ async function chapterScreen(id, live) {
     topbar(ch.name, { back: '#/course/' + ch.courseId, right: menuButton([
       { label: 'Edit note', onclick: editNote }, { label: 'Rename', onclick: rename }, { label: 'Delete chapter', danger: true, onclick: remove }]) }),
     pend ? h('a', { class: 'card flex tap', href: '#/review/' + id }, h('div', { class: 'grow' }, 'Items waiting for review'), h('span', { class: 'badge' }, pend)) : null,
-    h('button', { class: 'btn primary block', onclick: () => go('/test/chapter/' + id) }, 'Study this chapter'),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn primary', onclick: () => go('/test/chapter/' + id) }, 'Study this chapter'),
+      h('button', { class: 'btn', onclick: () => go('/flashcards/chapter/' + id) }, 'Flashcards')),
     note);
 }
 

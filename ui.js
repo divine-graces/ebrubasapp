@@ -38,7 +38,8 @@ const ICONS = {
   check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
   inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
   file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
-  layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>'
+  layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'
 };
 // Static strings only, never user data, so parsing them as HTML is safe.
 export function icon(name, size = 22) {
@@ -53,6 +54,19 @@ export const topbar = (title, { back, right } = {}) =>
   h('div', { class: 'topbar' },
     back ? h('a', { class: 'icon-btn', href: back, 'aria-label': 'Back' }, icon('back', 24)) : null,
     h('h1', {}, title), right || null);
+
+// Segmented control. items: [[value, label, disabled?]]. Calls onPick(value) and moves the highlight.
+export const seg = (items, value, onPick) => {
+  const btns = items.map(([v, label, off]) => h('button', {
+    class: v === value ? 'on' : '', disabled: off,
+    onclick: () => { btns.forEach((b, i) => b.classList.toggle('on', items[i][0] === v)); onPick(v); }
+  }, label));
+  return h('div', { class: 'seg' }, ...btns);
+};
+
+// MCQ / Flashcards switch at the top of the Study screens. Picking the other one navigates there.
+export const studySwitch = current => seg([['mcq', 'MCQ tests'], ['cards', 'Flashcards']], current === 'cards' ? 'cards' : 'mcq',
+  v => { if (v !== current) go(v === 'cards' ? '/flashcards' : '/study'); });
 
 // ---------- toasts, dialogs, menus ----------
 export function toast(msg, ms = 2600) {

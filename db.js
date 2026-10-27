@@ -50,6 +50,13 @@ export const updateChapter = (id, data) => soft(updateDoc(ref('chapters', id), {
 export const listQuestions = async courseId => rows(await getDocs(query(col('questions'), where('courseId', '==', courseId))));
 export const listCards = async courseId => rows(await getDocs(query(col('flashcards'), where('courseId', '==', courseId))));
 
+// every approved flashcard across all courses (the daily new-card limit is counted across everything)
+export const listApprovedCards = async () => rows(await getDocs(query(col('flashcards'), where('status', '==', 'approved'))));
+// srs: {box, dueAt, lastResult, introducedAt}. Dotted paths so only the srs fields change.
+export const reviewCard = (id, srs) => soft(updateDoc(ref('flashcards', id), {
+  'srs.box': srs.box, 'srs.dueAt': srs.dueAt, 'srs.lastResult': srs.lastResult, 'srs.introducedAt': srs.introducedAt
+}));
+
 export async function listPending(chapterId) {
   const f = n => getDocs(query(col(n), where('chapterId', '==', chapterId), where('status', '==', 'pending')));
   const [q, c] = await Promise.all([f('questions'), f('flashcards')]);
