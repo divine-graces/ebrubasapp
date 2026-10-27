@@ -113,7 +113,17 @@ export const recordAnswer = (id, right) => soft(updateDoc(ref('questions', id), 
   'stats.lastResult': right ? 'right' : 'wrong',
   'stats.lastSeenAt': Date.now()
 }));
+// Theory self-rating. missed: streak = 0. partial: streak unchanged (not mastered, so correct is not bumped either). got: streak + 1.
+// seen+1 for all three. lastResult is 'wrong' | 'partial' | 'right'.
+export const recordTheory = (id, rating) => soft(updateDoc(ref('questions', id), {
+  'stats.seen': increment(1),
+  ...(rating === 'got' ? { 'stats.correct': increment(1), 'stats.streak': increment(1) } : {}),
+  ...(rating === 'missed' ? { 'stats.streak': 0 } : {}),
+  'stats.lastResult': rating === 'got' ? 'right' : rating === 'partial' ? 'partial' : 'wrong',
+  'stats.lastSeenAt': Date.now()
+}));
 // attempt: {courseId, chapterIds[], type, date, score, total, results[{questionId, correct, chosenIndex}]}
+// (theory attempts store results[{questionId, correct, rating}] instead of chosenIndex)
 export const saveAttempt = a => soft(setDoc(doc(col('attempts')), a));
 
 // ---------- cascade deletes (Firestore does not do this for us) ----------

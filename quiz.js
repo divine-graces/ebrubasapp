@@ -1,6 +1,7 @@
 // quiz.js: MCQ test setup, bucket draw, test runner, result screen.
 import { h, topbar, toast, confirmDialog, renderMd, emptyState, icon, loading, go, fitMath, seg, studySwitch } from './ui.js';
 import * as db from './db.js';
+import { startTheory, theoryResumeCard } from './theory.js';
 
 const LETTERS = 'ABCD';
 const KEY = 'quizSession';
@@ -9,18 +10,32 @@ const shuffle = a => { const r = [...a]; for (let i = r.length - 1; i > 0; i--) 
 const md = (text, tag = 'div', cls = '', inline = false) => { const el = h(tag, { class: 'md ' + cls }); renderMd(el, text, inline); return el; };
 
 // ---------- draw: 50% unseen, 30% weak, 20% refresh, short buckets filled from the others ----------
-export function drawQuestions(pool, count) {
+// weighted (finals mode): the weak bucket favours questions from chapters with the lowest correct/seen ratio.
+export function drawQuestions(pool, count, weighted = false) {
   const n = Math.min(count, pool.length);
   const st = q => q.stats || {};
   const unseen = shuffle(pool.filter(q => !(st(q).seen > 0)));
   const seen = pool.filter(q => st(q).seen > 0);
-  const isWeak = q => st(q).lastResult === 'wrong' || (st(q).streak || 0) < 2;
-  const weak = shuffle(seen.filter(isWeak));
+  const isWeak = q => st(q).lastResult === 'wrong' || st(q).lastResult === 'partial' || (st(q).streak || 0) < 2;
+  let weak = shuffle(seen.filter(isWeak));
+  if (weighted) weak = weightByChapter(weak, pool);
   const refresh = seen.filter(q => !isWeak(q)).sort((a, b) => (st(a).lastSeenAt || 0) - (st(b).lastSeenAt || 0)); // oldest first
   const tu = Math.round(n * 0.5), tw = Math.round(n * 0.3), tr = Math.max(0, n - tu - tw);
   const picked = [...unseen.slice(0, tu), ...weak.slice(0, tw), ...refresh.slice(0, tr)];
   const leftovers = [...unseen.slice(tu), ...weak.slice(tw), ...refresh.slice(tr)];
   return shuffle([...picked, ...leftovers.slice(0, n - picked.length)]);
+}
+
+// Weighted random order (Efraimidis-Spirakis): chapter weakness = 1 - correct/seen over the whole pool, floored so a strong
+// chapter can still appear. Lowest ratio means highest weight, so those chapters fill the weak bucket first.
+export function chapterWeakness(pool) {
+  const t = {};
+  pool.forEach(q => { const c = (t[q.chapterId] ||= { seen: 0, correct: 0 }); c.seen += q.stats?.seen || 0; c.correct += q.stats?.correct || 0; });
+  return Object.fromEntries(Object.entries(t).map(([id, c]) => [id, Math.max(0.05, c.seen ? 1 - c.correct / c.seen : 0.5)]));
+}
+function weightByChapter(weak, pool) {
+  const w = chapterWeakness(pool);
+  return weak.map(q => ({ q, k: Math.random() ** (1 / (w[q.chapterId] || 0.5)) })).sort((a, b) => b.k - a.k).map(x => x.q);
 }
 
 // ---------- session (kept on the device so a reload does not lose a test) ----------
@@ -37,44 +52,48 @@ const newSession = (courseId, qs, mode) => ({
 });
 
 // ---------- test setup ----------
-export async function testSetupScreen({ courseId, chapterId } = {}) {
+export async function testSetupScreen({ courseId, chapterId, finals = false } = {}) {
   const courses = await db.listCourses();
-  if (!courses.length) return h('div', {}, topbar('Study'), emptyState('courses', 'Add a course and import some questions first.', h('a', { class: 'btn primary', href: '#/' }, 'Go to Courses')));
+  if (!courses.length) return h('div', {}, topbar('Study'), studySwitch('mcq'), emptyState('courses', 'Add a course and import some questions first.', h('a', { class: 'btn primary', href: '#/' }, 'Go to Courses')));
 
   const ticked = new Set();
   const fromCourse = !!courseId;
   if (chapterId) { const ch = await db.getChapter(chapterId); if (ch) { courseId = ch.courseId; ticked.add(chapterId); } }
   if (!courses.some(c => c.id === courseId)) courseId = courses[0].id;
-  let scope = fromCourse && !chapterId ? 'course' : 'chapters', mode = 'instant';
+  // scope: 'chapters' = pick some, 'course' = whole course, 'finals' = whole course with the weak bucket weighted to weak chapters
+  let scope = finals ? 'finals' : fromCourse && !chapterId ? 'course' : 'chapters', mode = 'instant', type = 'mcq';
   let chapters = [], qs = [];
 
-  const approvedMcq = () => qs.filter(q => q.type === 'mcq' && q.status === 'approved');
-  const scoped = () => scope === 'course' ? approvedMcq() : approvedMcq().filter(q => ticked.has(q.chapterId));
+  const noun = () => type === 'mcq' ? 'MCQ' : 'theory question';
+  const approvedOf = () => qs.filter(q => q.type === type && q.status === 'approved');
+  const scoped = () => scope === 'chapters' ? approvedOf().filter(q => ticked.has(q.chapterId)) : approvedOf();
 
   const courseSel = h('select', { value: courseId }, courses.map(c => h('option', { value: c.id }, c.name + (c.code ? ` (${c.code})` : ''))));
   const listBox = h('div', { class: 'card checklist' });
   const countIn = h('input', { type: 'number', min: '1', value: '30', inputmode: 'numeric' });
+  const countLabel = h('span', {}, 'Number of questions');
   const avail = h('p', { class: 'muted small' });
+  const finalsNote = h('p', { class: 'small muted', hidden: true }, 'Draws from every chapter of the course. The weak part of the test leans towards the chapters you score lowest in.');
   const pendNote = h('p', { class: 'small', hidden: true });
   const startBtn = h('button', { class: 'btn primary block', disabled: true }, icon('play', 18), 'Start test');
 
   const refresh = () => {
     const n = scoped().length;
-    avail.textContent = n ? `${n} approved MCQ${n > 1 ? 's' : ''} available in this selection.`
-      : scope === 'chapters' && !ticked.size ? 'Tick at least one chapter.' : 'No approved MCQs here yet.';
+    avail.textContent = n ? `${n} approved ${noun()}${n > 1 ? 's' : ''} available in this selection.`
+      : scope === 'chapters' && !ticked.size ? 'Tick at least one chapter.' : `No approved ${noun()}s here yet.`;
     startBtn.disabled = n === 0;
-    const pend = qs.filter(q => q.status === 'pending').length;
+    const pend = qs.filter(q => q.type === type && q.status === 'pending').length;
     pendNote.hidden = !pend;
     if (pend) pendNote.replaceChildren(`${pend} question${pend > 1 ? 's are' : ' is'} pending review in this course and will not appear in tests. `, h('a', { href: '#/review/c/' + courseSel.value }, 'Review them'));
   };
 
   const renderList = () => {
-    const count = id => approvedMcq().filter(q => q.chapterId === id).length;
+    const count = id => approvedOf().filter(q => q.chapterId === id).length;
     const rows = chapters.map(c => {
       const n = count(c.id);
       return h('label', { class: n ? '' : 'off' },
         h('input', { type: 'checkbox', checked: ticked.has(c.id), disabled: n === 0, onchange: e => { e.target.checked ? ticked.add(c.id) : ticked.delete(c.id); refresh(); } }),
-        h('span', { class: 'grow' }, c.name), h('span', { class: 'count' }, `${n} MCQ${n === 1 ? '' : 's'}`));
+        h('span', { class: 'grow' }, c.name), h('span', { class: 'count' }, type === 'mcq' ? `${n} MCQ${n === 1 ? '' : 's'}` : `${n} theory`));
     });
     listBox.replaceChildren(...(rows.length ? rows : [h('p', { class: 'muted' }, 'No chapters in this course yet.')]));
   };
@@ -93,26 +112,31 @@ export async function testSetupScreen({ courseId, chapterId } = {}) {
   courseSel.onchange = () => { ticked.clear(); loadCourse(); };
 
   const selAll = h('button', { class: 'link', onclick: () => {
-    const usable = chapters.filter(c => approvedMcq().some(q => q.chapterId === c.id));
+    const usable = chapters.filter(c => approvedOf().some(q => q.chapterId === c.id));
     if (ticked.size === usable.length) ticked.clear(); else usable.forEach(c => ticked.add(c.id));
     renderList(); refresh();
   } }, 'Select all / none');
   const chaptersBlock = h('div', {}, h('div', { class: 'between' }, h('span', { class: 'muted small' }, 'Chapters'), selAll), listBox);
-  chaptersBlock.hidden = scope !== 'chapters';
+  const feedbackBlock = h('div', {}, h('div', { class: 'muted small' }, 'Feedback'),
+    seg([['instant', 'Instant feedback'], ['end', 'Feedback at the end']], mode, v => { mode = v; }));
+  const syncScope = () => { chaptersBlock.hidden = scope !== 'chapters'; finalsNote.hidden = scope !== 'finals'; };
+  const syncType = () => { feedbackBlock.hidden = type !== 'mcq'; countIn.value = type === 'mcq' ? '30' : '10'; };
+  syncScope();
 
   startBtn.onclick = () => {
     const pool = scoped();
     if (!pool.length) return;
     const want = parseInt(countIn.value, 10);
     if (!(want >= 1)) return toast('Enter how many questions you want (1 or more).');
-    const picked = drawQuestions(pool, want).map(toQ);
-    if (picked.length < want) toast(`Only ${picked.length} approved questions available, so the test has ${picked.length}.`);
-    session = newSession(courseSel.value, picked, mode);
+    const drawn = drawQuestions(pool, want, scope === 'finals');
+    if (drawn.length < want) toast(`Only ${drawn.length} approved questions available, so the test has ${drawn.length}.`);
+    if (type === 'theory') return startTheory(courseSel.value, drawn);
+    session = newSession(courseSel.value, drawn.map(toQ), mode);
     persist();
     go('/quiz');
   };
 
-  // unfinished test from earlier
+  // unfinished tests from earlier
   const resume = restore();
   const resumeCard = resume && !resume.finished ? h('div', { class: 'card' },
     h('div', { class: 'title' }, 'Test in progress'),
@@ -123,17 +147,17 @@ export async function testSetupScreen({ courseId, chapterId } = {}) {
 
   await loadCourse();
   return h('div', {},
-    topbar('Study'),
+    topbar(scope === 'finals' ? 'Finals mode' : 'Study'),
     resumeCard,
+    theoryResumeCard(),
     studySwitch('mcq'),
-    seg([['mcq', 'MCQ'], ['theory', 'Theory (Phase 4)', true]], 'mcq', () => {}),
+    seg([['mcq', 'MCQ'], ['theory', 'Theory']], type, v => { type = v; syncType(); renderList(); refresh(); }),
     h('label', { class: 'field' }, h('span', {}, 'Course'), courseSel),
-    seg([['chapters', 'Pick chapters'], ['course', 'Whole course']], scope, v => { scope = v; chaptersBlock.hidden = v !== 'chapters'; refresh(); }),
-    chaptersBlock,
-    h('label', { class: 'field' }, h('span', {}, 'Number of questions'), countIn),
+    seg([['chapters', 'Pick chapters'], ['course', 'Whole course'], ['finals', 'Finals mode']], scope, v => { scope = v; syncScope(); refresh(); }),
+    chaptersBlock, finalsNote,
+    h('label', { class: 'field' }, countLabel, countIn),
     avail, pendNote,
-    h('div', { class: 'muted small' }, 'Feedback'),
-    seg([['instant', 'Instant feedback'], ['end', 'Feedback at the end']], mode, v => { mode = v; }),
+    feedbackBlock,
     startBtn);
 }
 

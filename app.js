@@ -7,6 +7,7 @@ import { reviewOverview, reviewQueue } from './review.js';
 import { testSetupScreen, quizScreen } from './quiz.js';
 import { statsScreen } from './stats.js';
 import { flashSetupScreen, dueCountsByCourse } from './flashcards.js';
+import { theoryScreen } from './theory.js';
 
 const view = $('#view');
 let navId = 0, signedIn = false;
@@ -20,14 +21,13 @@ const show = (live, ...nodes) => {
 };
 const tally = (arr, key) => arr.reduce((m, x) => { m[x[key]] = (m[x[key]] || 0) + 1; return m; }, {});
 const safe = fn => async (...a) => { try { await fn(...a); } catch (e) { console.error(e); toast('Something went wrong: ' + (e.message || e), 4500); } };
-const soon = msg => () => toast(msg);
 
 // ---------- router ----------
 async function route() {
   if (!signedIn) return;
   const id = ++navId, live = () => id === navId;
   const [a, b, c] = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  const active = ['import', 'stats'].includes(a) ? a : ['study', 'test', 'quiz', 'flashcards'].includes(a) ? 'study' : a === 'review' ? '' : 'courses';
+  const active = ['import', 'stats'].includes(a) ? a : ['study', 'test', 'quiz', 'theory', 'flashcards'].includes(a) ? 'study' : a === 'review' ? '' : 'courses';
   document.querySelectorAll('#nav a').forEach(x => x.classList.toggle('on', x.dataset.r === active));
   view.replaceChildren(loading());
   try {
@@ -36,9 +36,10 @@ async function route() {
     else if (a === 'chapter') await chapterScreen(b, live);
     else if (a === 'import') show(live, await importScreen());
     else if (a === 'review') show(live, b === 'c' ? await reviewOverview(c) : b ? await reviewQueue(b) : await reviewOverview());
-    else if (a === 'study' || a === 'test') show(live, await testSetupScreen(b === 'course' ? { courseId: c } : b === 'chapter' ? { chapterId: c } : {}));
+    else if (a === 'study' || a === 'test') show(live, await testSetupScreen(b === 'course' ? { courseId: c } : b === 'finals' ? { courseId: c, finals: true } : b === 'chapter' ? { chapterId: c } : {}));
     else if (a === 'flashcards') show(live, await flashSetupScreen(b === 'course' ? { courseId: c } : b === 'chapter' ? { chapterId: c } : {}));
     else if (a === 'quiz') show(live, quizScreen());
+    else if (a === 'theory') show(live, theoryScreen());
     else if (a === 'stats') show(live, await statsScreen());
     else go('/');
   } catch (e) {
@@ -111,7 +112,7 @@ async function courseScreen(courseId, live) {
     h('div', { class: 'grid3' },
       h('button', { class: 'btn', onclick: () => go('/test/course/' + courseId) }, 'Take test'),
       h('button', { class: 'btn', onclick: () => go('/flashcards/course/' + courseId) }, 'Flashcards'),
-      h('button', { class: 'btn', onclick: soon('Finals mode arrives in Phase 4') }, 'Finals mode')),
+      h('button', { class: 'btn', onclick: () => go('/test/finals/' + courseId) }, 'Finals mode')),
     pend ? h('a', { class: 'card flex tap', href: '#/review/c/' + courseId }, h('div', { class: 'grow' }, 'Items waiting for review'), h('span', { class: 'badge' }, pend)) : null,
     chapters.length
       ? chapters.map(c => {
