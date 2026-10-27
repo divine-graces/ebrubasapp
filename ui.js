@@ -146,3 +146,66 @@ export function renderMd(el, md, inline = false) {
     });
   }
 }
+
+// ---------- long formulas: wrap, then scale, never scroll ----------
+// 1. KaTeX already wraps inline math at + - = signs.
+// 2. A long \text{...} block can wrap too, but KaTeX writes its spaces as non-breaking spaces, so those become normal spaces.
+// 3. Whatever still does not fit (one big fraction, display math) is scaled down to the width of its container.
+// 4. If it still does not fit at the readability floor, display math is re-rendered inline so it can wrap; if that does not
+//    help either (an unbreakable \left( ... \right) group), the original stays and scrolls inside its own box, never the page.
+// Needs layout, so call it AFTER the nodes are in the page.
+let fitRoot = null;
+function fitNow(root, minScale = 0.5) {
+  const ks = [...root.querySelectorAll('.katex')];
+  ks.forEach(k => { k.style.fontSize = ''; k.classList.remove('wrap'); }); // natural size first, so re-fitting works
+  root.querySelectorAll('.md.scrolls').forEach(e => e.classList.remove('scrolls'));
+  ks.forEach(k0 => {
+    let k = k0;
+    const host = k.closest('.md') || root, avail = host.clientWidth;
+    if (!avail) return; // hidden (e.g. the explanation before it is revealed)
+    let display = !!k.closest('.katex-display');
+    const need = () => display
+      ? k.scrollWidth
+      : Math.max(0, ...[...k.querySelectorAll('.katex-html > .base')].map(b => b.getBoundingClientRect().width));
+    // Widths do not shrink perfectly in step with font size (glyph rounding), so measure again after each shrink.
+    const shrink = () => {
+      let scale = 1;
+      for (let pass = 0; pass < 5; pass++) {
+        const n = need();
+        if (n <= avail + 1 || scale <= minScale) break;
+        scale = Math.max(minScale, scale * avail * 0.98 / n); // aim 2% under: text size changes in steps, not smoothly
+        k.style.fontSize = (1.21 * scale).toFixed(3) + 'em'; // 1.21em = KaTeX default
+      }
+      return need() <= avail + 1;
+    };
+    if (!display && need() > avail + 1 && k.querySelector('.text')) {
+      k.querySelectorAll('.text').forEach(t => {
+        const w = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) n.nodeValue = n.nodeValue.replace(/\u00a0/g, ' ');
+      });
+      k.classList.add('wrap');
+    }
+    // last resort: only a formula that really cannot fit gets a scroll box (display math already has its own)
+    const giveUp = () => { if (!display && need() > avail + 1) host.classList.add('scrolls'); };
+    if (shrink()) return;
+    if (!display || !window.katex) return giveUp();
+    const tex = k.querySelector('annotation[encoding="application/x-tex"]')?.textContent;
+    if (!tex) return;
+    const holder = k.closest('.katex-display'), tmp = document.createElement('span');
+    window.katex.render(tex, tmp, { displayMode: false, throwOnError: false });
+    const inline = tmp.querySelector('.katex');
+    if (!inline) return;
+    holder.replaceWith(inline);
+    const original = k; k = inline; display = false;
+    if (!shrink()) { inline.replaceWith(holder); k = original; display = true; } // no gain: put the display version back
+    else giveUp();
+  });
+}
+export function fitMath(root) {
+  fitRoot = root;
+  fitNow(root);
+}
+// widths change when KaTeX's fonts finish loading, and on rotation / keyboard: re-fit the current screen
+const refit = () => { if (fitRoot) requestAnimationFrame(() => fitNow(fitRoot)); };
+document.fonts?.addEventListener('loadingdone', refit);
+window.addEventListener('resize', refit);

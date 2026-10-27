@@ -1,5 +1,5 @@
 // quiz.js: MCQ test setup, bucket draw, test runner, result screen.
-import { h, topbar, toast, confirmDialog, renderMd, emptyState, icon, loading, go } from './ui.js';
+import { h, topbar, toast, confirmDialog, renderMd, emptyState, icon, loading, go, fitMath } from './ui.js';
 import * as db from './db.js';
 
 const LETTERS = 'ABCD';
@@ -188,6 +188,7 @@ export function quizScreen() {
       });
       expl.replaceChildren(h('b', { class: a.correct ? 'ok' : 'err' }, a.correct ? 'Correct' : 'Not quite'), md(q.explanation || 'No explanation was added for this question.'));
       expl.hidden = false; next.disabled = false;
+      fitMath(box); // the explanation had no width while hidden
     };
 
     // stats update: seen+1, correct+1 if right, streak+1 if right else 0, lastResult, lastSeenAt
@@ -244,14 +245,14 @@ export function quizScreen() {
         ? [h('h2', { style: 'margin-top:20px' }, `Missed (${misses.length})`),
            misses.map(({ q, a }) => h('div', { class: 'card' },
              md(q.q),
-             h('div', { class: 'opt wrong' }, h('b', {}, 'Your answer'), md(q.options[a.chosenIndex], 'span', 'inline', true)),
-             h('div', { class: 'opt correct' }, h('b', {}, 'Correct'), md(q.options[q.answer], 'span', 'inline', true)),
+             h('div', { class: 'opt wrong stack' }, h('b', {}, 'Your answer'), md(q.options[a.chosenIndex], 'span', 'inline', true)),
+             h('div', { class: 'opt correct stack' }, h('b', {}, 'Correct'), md(q.options[q.answer], 'span', 'inline', true)),
              q.explanation ? h('div', { class: 'expl' }, md(q.explanation)) : null))]
         : emptyState('check', 'Perfect score. Nothing missed.')
     ].flat(Infinity);
   }
 
-  function draw() { box.replaceChildren(...(session.finished ? resultView() : questionView())); window.scrollTo(0, 0); }
+  function draw() { box.replaceChildren(...(session.finished ? resultView() : questionView())); fitMath(box); window.scrollTo(0, 0); }
   draw();
-  return h('div', {}, box);
+  return h('div', { class: 'quiz' }, box);
 }

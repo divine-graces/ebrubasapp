@@ -123,7 +123,7 @@ main{padding:0 var(--s4) calc(var(--nav) + env(safe-area-inset-bottom) + 96px);m
 .md pre{overflow-x:auto;background:var(--surface-2);padding:var(--s3);border-radius:var(--r-sm)}
 .md p{margin:.55em 0}
 .md.inline{flex:1;min-width:0}
-.katex-display{overflow-x:auto;overflow-y:hidden;padding:2px 0}
+.katex-display{overflow-x:auto;overflow-y:hidden;padding:.4em 0;margin:.6em 0}
 
 .opt{display:flex;gap:var(--s2);padding:10px var(--s3);border:1px solid var(--line);border-radius:var(--r-sm);margin:6px 0;background:var(--surface-2)}
 .opt.correct{border-color:var(--ok);background:var(--ok-soft)}
@@ -156,7 +156,7 @@ main{padding:0 var(--s4) calc(var(--nav) + env(safe-area-inset-bottom) + 96px);m
 .qopt:active{transform:scale(.985)}
 .qopt:disabled{color:var(--text);cursor:default}
 .qopt .l{width:28px;height:28px;border-radius:50%;background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-weight:650;font-size:.85rem;flex:none}
-.qopt .md{display:block;flex:1;min-width:0;overflow-x:auto}
+.qopt .md{display:block;flex:1;min-width:0}
 .qopt.picked{border-color:var(--accent);background:var(--accent-soft)}
 .qopt.picked .l{background:var(--accent);color:var(--accent-ink)}
 .qopt.right{border-color:var(--ok);background:var(--ok-soft)}
@@ -176,3 +176,15 @@ main{padding:0 var(--s4) calc(var(--nav) + env(safe-area-inset-bottom) + 96px);m
 .pct.lo{color:var(--bad)}
 .pct.mid{color:var(--warn)}
 .pct.hi{color:var(--ok)}
+
+/* long formulas in option buttons: wrap/scale (see fitMath in ui.js); tighter display-math spacing inside buttons */
+.qopt .katex-display{margin:.35em 0}
+.qopt .md{overflow-wrap:anywhere}
+.katex.wrap .base{display:inline;white-space:normal;width:auto}
+/* result list: label above the formula so long formulas get the full width */
+.opt.stack{flex-direction:column;gap:var(--s1)}
+.opt.stack>b{font-size:.75rem;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.opt.stack>.md{width:100%}
+/* last resort only (set by fitMath): a formula that cannot fit even at the smallest readable size scrolls sideways inside its own box.
+   Never applied by default, because overflow-x:auto also turns 1px of vertical overflow (square roots) into a vertical scrollbar. */
+.md.scrolls{overflow-x:auto;overflow-y:hidden;padding:.3em 0}
