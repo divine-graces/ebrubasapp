@@ -1,12 +1,12 @@
 // sw.js: makes the app shell work offline. Data is NOT handled here: Firestore keeps its own offline cache (see firebase.js).
 // Bump VERSION when you want every device to drop its cached copy of your own files.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = 'study-shell-' + VERSION; // your own files
 const LIBS = 'study-libs';              // CDN files (KaTeX, marked, DOMPurify, Firebase SDK). URLs are version-pinned, so they never go stale.
 
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'app.js', 'auth.js', 'db.js', 'firebase.js', 'flashcards.js', 'import.js', 'quiz.js', 'review.js', 'stats.js', 'theory.js', 'ui.js',
+  'app.js', 'auth.js', 'db.js', 'firebase.js', 'flashcards.js', 'import.js', 'quiz.js', 'review.js', 'stats.js', 'theory.js', 'todos.js', 'journal.js', 'ui.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
 

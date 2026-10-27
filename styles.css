@@ -207,3 +207,10 @@ main{padding:0 var(--s4) calc(var(--nav) + env(safe-area-inset-bottom) + 96px);m
 .hist{padding:var(--s2) 0;border-bottom:1px solid var(--line)}
 .hist:last-child{border-bottom:0;padding-bottom:0}
 .hist .chip{margin-bottom:0}
+
+/* ---------- Phase 6: plan (to-do + journal) ---------- */
+.quickadd{display:flex;gap:var(--s2);margin:var(--s3) 0}
+.quickadd .btn{flex:none}
+.todo{padding:var(--s2) var(--s3) var(--s2) var(--s1)}
+.todo .tick{display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;cursor:pointer}
+.todo.done .title{text-decoration:line-through;color:var(--muted)}

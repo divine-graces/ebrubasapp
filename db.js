@@ -129,6 +129,27 @@ export const listAttempts = async courseId =>
 // (theory attempts store results[{questionId, correct, rating}] instead of chosenIndex)
 export const saveAttempt = a => soft(setDoc(doc(col('attempts')), a));
 
+// ---------- to-do + journal (independent of courses, so nothing to cascade) ----------
+// add* return the new id straight away (for instant UI) plus a promise that settles when the write is done.
+const addTo = (name, data) => { const r = doc(col(name)); return { id: r.id, done: soft(setDoc(r, data)) }; };
+export const listTodos = async () => rows(await getDocs(col('todos')));
+export const addTodo = data => addTo('todos', data);
+export const updateTodo = (id, data) => soft(updateDoc(ref('todos', id), data));
+export const deleteTodo = id => soft(deleteDoc(ref('todos', id)));
+export async function deleteTodos(ids) {
+  const jobs = [];
+  for (let i = 0; i < ids.length; i += 450) {
+    const b = writeBatch(db);
+    ids.slice(i, i + 450).forEach(id => b.delete(ref('todos', id)));
+    jobs.push(b.commit());
+  }
+  await soft(Promise.all(jobs));
+}
+export const listJournal = async () => rows(await getDocs(col('journal')));
+export const addJournal = data => addTo('journal', data);
+export const updateJournal = (id, data) => soft(updateDoc(ref('journal', id), { ...data, updatedAt: Date.now() }));
+export const deleteJournal = id => soft(deleteDoc(ref('journal', id)));
+
 // ---------- cascade deletes (Firestore does not do this for us) ----------
 async function deleteWhere(name, field, value) {
   const snap = await getDocs(query(col(name), where(field, '==', value)));

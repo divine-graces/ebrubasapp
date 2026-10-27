@@ -8,6 +8,8 @@ import { testSetupScreen, quizScreen } from './quiz.js';
 import { statsScreen } from './stats.js';
 import { flashSetupScreen, dueCountsByCourse } from './flashcards.js';
 import { theoryScreen } from './theory.js';
+import { todoScreen } from './todos.js';
+import { journalScreen } from './journal.js';
 
 const view = $('#view');
 let navId = 0, signedIn = false;
@@ -27,7 +29,7 @@ async function route() {
   if (!signedIn) return;
   const id = ++navId, live = () => id === navId;
   const [a, b, c] = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  const active = ['import', 'stats'].includes(a) ? a : ['study', 'test', 'quiz', 'theory', 'flashcards'].includes(a) ? 'study' : a === 'review' ? '' : 'courses';
+  const active = ['import', 'stats'].includes(a) ? a : ['todo', 'journal'].includes(a) ? 'plan' : ['study', 'test', 'quiz', 'theory', 'flashcards'].includes(a) ? 'study' : a === 'review' ? '' : 'courses';
   document.querySelectorAll('#nav a').forEach(x => x.classList.toggle('on', x.dataset.r === active));
   view.replaceChildren(loading());
   try {
@@ -40,6 +42,8 @@ async function route() {
     else if (a === 'flashcards') show(live, await flashSetupScreen(b === 'course' ? { courseId: c } : b === 'chapter' ? { chapterId: c } : {}));
     else if (a === 'quiz') show(live, quizScreen());
     else if (a === 'theory') show(live, theoryScreen());
+    else if (a === 'todo') show(live, await todoScreen());
+    else if (a === 'journal') show(live, await journalScreen());
     else if (a === 'stats') show(live, await statsScreen());
     else go('/');
   } catch (e) {
