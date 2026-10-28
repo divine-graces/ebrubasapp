@@ -43,11 +43,14 @@ let session = null;
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(session)); } catch { /* storage full or blocked */ } };
 const restore = () => { if (!session) { try { session = JSON.parse(localStorage.getItem(KEY)); } catch { session = null; } } return session; };
 const clear = () => { session = null; try { localStorage.removeItem(KEY); } catch { /* ignore */ } };
+// Called on sign out: forget the test in progress, in memory and on this device.
+export const resetQuizSession = clear;
 
 // Option order is shuffled per question for display only. chosenIndex is always stored against the ORIGINAL order.
 const toQ = q => ({ id: q.id, chapterId: q.chapterId, q: q.q, options: q.options, answer: q.answer, explanation: q.explanation || '', order: shuffle([0, 1, 2, 3]) });
-const newSession = (courseId, qs, mode) => ({
-  courseId, mode, qs, i: 0, answers: qs.map(() => null), finished: false, saved: false,
+// retake = a "Retake missed only" run: stats update as normal, but the saved attempt is marked so history can set it apart
+const newSession = (courseId, qs, mode, retake = false) => ({
+  courseId, mode, qs, i: 0, answers: qs.map(() => null), finished: false, saved: false, retake,
   chapterIds: [...new Set(qs.map(q => q.chapterId))]
 });
 
@@ -62,7 +65,7 @@ export async function testSetupScreen({ courseId, chapterId, finals = false } = 
   if (!courses.some(c => c.id === courseId)) courseId = courses[0].id;
   // scope: 'chapters' = pick some, 'course' = whole course, 'finals' = whole course with the weak bucket weighted to weak chapters
   let scope = finals ? 'finals' : fromCourse && !chapterId ? 'course' : 'chapters', mode = 'instant', type = 'mcq';
-  let chapters = [], qs = [];
+  let chapters = [], qs = [], pendQ = null; // qs = APPROVED questions of the selected course; pendQ = {mcq, theory} pending counts
 
   const noun = () => type === 'mcq' ? 'MCQ' : 'theory question';
   const approvedOf = () => qs.filter(q => q.type === type && q.status === 'approved');
@@ -82,7 +85,7 @@ export async function testSetupScreen({ courseId, chapterId, finals = false } = 
     avail.textContent = n ? `${n} approved ${noun()}${n > 1 ? 's' : ''} available in this selection.`
       : scope === 'chapters' && !ticked.size ? 'Tick at least one chapter.' : `No approved ${noun()}s here yet.`;
     startBtn.disabled = n === 0;
-    const pend = qs.filter(q => q.type === type && q.status === 'pending').length;
+    const pend = pendQ ? pendQ[type] : 0;
     pendNote.hidden = !pend;
     if (pend) pendNote.replaceChildren(`${pend} question${pend > 1 ? 's are' : ' is'} pending review in this course and will not appear in tests. `, h('a', { href: '#/review/c/' + courseSel.value }, 'Review them'));
   };
@@ -102,10 +105,10 @@ export async function testSetupScreen({ courseId, chapterId, finals = false } = 
     const cid = courseSel.value;
     listBox.replaceChildren(loading());
     try {
-      const [c, q] = await Promise.all([db.listChapters(cid), db.listQuestions(cid)]);
+      const [c, q, pq] = await Promise.all([db.listChapters(cid), db.listApprovedQuestions(cid), db.pendingQuestionCounts(cid)]);
       if (cid !== courseSel.value) return; // course changed while loading
-      chapters = c; qs = q;
-    } catch (e) { console.error('Could not load test data', e); toast('Could not load questions: ' + (e.message || e), 4500); chapters = []; qs = []; }
+      chapters = c; qs = q; pendQ = pq;
+    } catch (e) { console.error('Could not load test data', e); toast('Could not load questions: ' + (e.message || e), 4500); chapters = []; qs = []; pendQ = null; }
     for (const id of [...ticked]) if (!chapters.some(c => c.id === id)) ticked.delete(id);
     renderList(); refresh();
   };
@@ -174,7 +177,7 @@ export function quizScreen() {
     s.finished = true; s.score = res.filter(r => r.correct).length; s.total = res.length;
     if (!s.saved && res.length) {
       s.saved = true;
-      db.saveAttempt({ courseId: s.courseId, chapterIds: s.chapterIds, type: 'mcq', date: Date.now(), score: s.score, total: s.total, results: res }).catch(fail);
+      db.saveAttempt({ courseId: s.courseId, chapterIds: s.chapterIds, type: 'mcq', date: Date.now(), score: s.score, total: s.total, results: res, ...(s.retake ? { retake: true } : {}) }).catch(fail);
     }
     persist(); draw();
   };
@@ -246,7 +249,7 @@ export function quizScreen() {
     const pct = s.total ? Math.round((s.score / s.total) * 100) : 0;
     const misses = s.qs.map((q, i) => ({ q, a: s.answers[i] })).filter(x => x.a && !x.a.correct);
     const retake = () => {
-      session = newSession(s.courseId, shuffle(misses.map(m => ({ ...m.q, order: shuffle([0, 1, 2, 3]) }))), s.mode);
+      session = newSession(s.courseId, shuffle(misses.map(m => ({ ...m.q, order: shuffle([0, 1, 2, 3]) }))), s.mode, true);
       persist(); draw(); window.scrollTo(0, 0);
     };
     return [

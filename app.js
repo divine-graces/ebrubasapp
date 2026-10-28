@@ -1,18 +1,19 @@
 // app.js: entry point. Auth gate, hash router, Courses / Course / Chapter screens.
 import { onUser, logout, renderLogin } from './auth.js';
 import * as db from './db.js';
-import { h, $, topbar, menuButton, toast, confirmDialog, formModal, renderMd, loading, setSync, go, icon, emptyState } from './ui.js';
+import { h, $, topbar, menuButton, toast, confirmDialog, formModal, renderMd, loading, setSync, go, icon, emptyState, watchOnline } from './ui.js';
 import { importScreen } from './import.js';
 import { reviewOverview, reviewQueue } from './review.js';
-import { testSetupScreen, quizScreen } from './quiz.js';
+import { testSetupScreen, quizScreen, resetQuizSession } from './quiz.js';
 import { statsScreen } from './stats.js';
-import { flashSetupScreen, dueCountsByCourse } from './flashcards.js';
-import { theoryScreen } from './theory.js';
+import { flashSetupScreen, dueFromCounts, startOfDay } from './flashcards.js';
+import { theoryScreen, resetTheorySession } from './theory.js';
 import { todoScreen } from './todos.js';
 import { journalScreen } from './journal.js';
+import { settingsScreen } from './settings.js';
 
 const view = $('#view');
-let navId = 0, signedIn = false;
+let navId = 0, signedIn = false, indexWarned = false;
 
 // Screens pass arrays (courses.map(...)) and null (conditional banners). replaceChildren would turn
 // those into the text "null" / "[object HTMLDivElement]", so flatten and drop empties first.
@@ -45,6 +46,7 @@ async function route() {
     else if (a === 'todo') show(live, await todoScreen());
     else if (a === 'journal') show(live, await journalScreen());
     else if (a === 'stats') show(live, await statsScreen());
+    else if (a === 'settings') show(live, settingsScreen());
     else go('/');
   } catch (e) {
     console.error(e);
@@ -53,13 +55,53 @@ async function route() {
   }
 }
 
+// ---------- Download for offline ----------
+// A button plus a status line. run(onProgress) does the work and returns the counts. Disabled (with a short message) while offline.
+function downloadControl(label, run) {
+  const btn = h('button', { class: 'btn block' }, icon('download', 18), label);
+  const msg = h('p', { class: 'muted small center-text' });
+  let busy = false, text = '', isErr = false;
+  const sync = () => {
+    const on = navigator.onLine;
+    btn.disabled = !on || busy;
+    msg.className = (on && isErr ? 'err' : 'muted') + ' small center-text';
+    msg.textContent = on ? text : 'Connect to the internet to download.';
+  };
+  const count = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  btn.onclick = async () => {
+    if (busy || !navigator.onLine) return;
+    busy = true; isErr = false; text = 'Downloading… 0%'; sync();
+    try {
+      const r = await run((done, total, name) => {
+        text = `Downloading${name ? ' ' + name : ''}… ${total ? Math.round((done / total) * 100) : 100}%`; sync();
+      });
+      text = `Saved ${count(r.chapters, 'chapter')}, ${count(r.questions, 'question')}, ${count(r.cards, 'card')} for offline use.`;
+    } catch (e) {
+      console.error(e); isErr = true; text = e.message || 'Download failed.';
+    } finally { busy = false; sync(); }
+  };
+  const box = h('div', {}, btn, msg);
+  watchOnline(btn, sync); // re-checks on the online/offline events (and once now)
+  return box;
+}
+
 // ---------- Courses (home) ----------
 async function coursesScreen(live) {
-  const [courses, chapters, pend, approvedCards] = await Promise.all([db.listCourses(), db.listAllChapters(), db.listPendingAll(), db.listApprovedCards()]);
-  const chCount = tally(chapters, 'courseId');
-  const due = dueCountsByCourse(approvedCards);
-  const pCount = tally([...pend.questions, ...pend.cards], 'courseId');
-  const total = pend.questions.length + pend.cards.length;
+  const courses = await db.listCourses();
+  // Count queries only (one set per course, in parallel): no chapters, questions or cards are downloaded.
+  // A count that fails offline is null, and a null count simply shows no badge.
+  const [used, counts] = await Promise.all([
+    db.introducedSince(startOfDay(Date.now())).catch(() => null),
+    Promise.all(courses.map(c => db.courseHomeCounts(c.id)))]);
+  const chCount = {}, due = {}, pCount = {};
+  courses.forEach((c, i) => {
+    const k = counts[i];
+    chCount[c.id] = k.chapters;
+    if (k.pendQ != null && k.pendC != null) pCount[c.id] = k.pendQ + k.pendC;
+    if (used != null && k.dueAll != null && k.newApproved != null) due[c.id] = dueFromCounts(k.dueAll, k.newApproved, used);
+  });
+  const total = Object.values(pCount).reduce((n, x) => n + x, 0);
+  if (db.lastIndexError && !indexWarned) { indexWarned = true; toast('Due-card badges need a Firestore index. Open the browser console for the link.', 8000); }
 
   const addCourse = safe(async () => {
     const r = await formModal({ title: 'New course', fields: [
@@ -86,7 +128,12 @@ async function coursesScreen(live) {
   });
 
   show(live,
-    topbar('Courses', { right: h('button', { class: 'icon-btn', 'aria-label': 'Sign out', onclick: () => confirmDialog('Sign out?', 'Sign out', false).then(ok => ok && logout()) }, icon('logout', 22)) }),
+    topbar('Courses', { right: h('div', { style: 'display:inline-flex' },
+      // small dot on the gear when the last export is over 30 days old (or there never was one)
+      h('button', { class: 'icon-btn', 'aria-label': db.exportOverdue() ? 'Settings (backup due)' : 'Settings', style: 'position:relative', onclick: () => go('/settings') },
+        icon('settings', 22),
+        db.exportOverdue() ? h('span', { style: 'position:absolute;top:9px;right:9px;width:10px;height:10px;border-radius:50%;background:var(--warn);border:2px solid var(--bg)' }) : null),
+      h('button', { class: 'icon-btn', 'aria-label': 'Sign out', onclick: () => confirmDialog('Sign out?', 'Sign out', false).then(ok => ok && logout()) }, icon('logout', 22))) }),
     total ? h('a', { class: 'card flex tap', href: '#/review' }, h('div', { class: 'grow' }, 'Items waiting for review'), h('span', { class: 'badge' }, total)) : null,
     courses.length
       ? courses.map(c => h('div', { class: 'card flex tap', onclick: () => go('/course/' + c.id) },
@@ -98,17 +145,15 @@ async function coursesScreen(live) {
           pCount[c.id] ? h('a', { class: 'badge', href: '#/review/c/' + c.id, onclick: e => e.stopPropagation() }, pCount[c.id] + ' to review') : null,
           menuButton([{ label: 'Rename', onclick: () => rename(c) }, { label: 'Delete', danger: true, onclick: () => remove(c) }])))
       : emptyState('courses', 'No courses yet. Tap the plus button to add your first one.'),
+    courses.length ? downloadControl('Download everything', p => db.downloadAll(p)) : null,
     h('button', { class: 'fab', 'aria-label': 'Add course', onclick: addCourse }, icon('plus', 28)));
 }
 
 // ---------- Course page ----------
 async function courseScreen(courseId, live) {
-  const [course, chapters, qs, cards] = await Promise.all([db.getCourse(courseId), db.listChapters(courseId), db.listQuestions(courseId), db.listCards(courseId)]);
+  const [course, chapters] = await Promise.all([db.getCourse(courseId), db.listChapters(courseId)]);
   if (!course) return show(live, topbar('Not found', { back: '#/' }), emptyState('inbox', 'This course no longer exists.'));
-  const st = {};
-  const S = id => (st[id] ||= { mcq: 0, theory: 0, cards: 0, pending: 0 });
-  qs.forEach(q => { const s = S(q.chapterId); if (q.status === 'pending') s.pending++; else s[q.type]++; });
-  cards.forEach(c => { const s = S(c.chapterId); if (c.status === 'pending') s.pending++; else s.cards++; });
+  const st = await db.chapterCounts(courseId, chapters.map(c => c.id)); // count queries, not documents
   const pend = Object.values(st).reduce((n, s) => n + s.pending, 0);
 
   show(live,
@@ -117,6 +162,7 @@ async function courseScreen(courseId, live) {
       h('button', { class: 'btn', onclick: () => go('/test/course/' + courseId) }, 'Take test'),
       h('button', { class: 'btn', onclick: () => go('/flashcards/course/' + courseId) }, 'Flashcards'),
       h('button', { class: 'btn', onclick: () => go('/test/finals/' + courseId) }, 'Finals mode')),
+    downloadControl('Download for offline', p => db.downloadCourse(courseId, p)),
     pend ? h('a', { class: 'card flex tap', href: '#/review/c/' + courseId }, h('div', { class: 'grow' }, 'Items waiting for review'), h('span', { class: 'badge' }, pend)) : null,
     chapters.length
       ? chapters.map(c => {
@@ -176,6 +222,15 @@ async function chapterScreen(id, live) {
     note);
 }
 
+// ---------- sign out: forget everything kept in the browser for this account ----------
+// quizSession and theorySession (with its draft answers) are cleared by their own modules, in memory and in localStorage.
+// statsCourse and importCourse are the per-user keys in sessionStorage. Nothing else is touched.
+function clearUserData() {
+  resetQuizSession();
+  resetTheorySession();
+  for (const k of ['statsCourse', 'importCourse']) { try { sessionStorage.removeItem(k); } catch { /* ignore */ } }
+}
+
 // ---------- boot ----------
 db.setSyncHook(setSync);
 window.addEventListener('hashchange', route);
@@ -189,6 +244,7 @@ onUser(user => {
     route();
   } else {
     db.setUid(null);
+    clearUserData();
     $('#shell').hidden = true;
     const l = $('#login'); l.hidden = false; renderLogin(l);
   }

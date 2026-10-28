@@ -32,6 +32,8 @@ const ICONS = {
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   more: '<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
   play: '<polygon points="5 3 19 12 5 21 5 3"/>',
   retry: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
@@ -145,22 +147,41 @@ export function setSync(s) {
 window.addEventListener('online', () => setSync());
 window.addEventListener('offline', () => setSync());
 
+// Calls fn() now, and again whenever the browser goes online or offline (no reload needed).
+// Stops by itself once `el` has been removed from the page, so screens do not leak listeners.
+export function watchOnline(el, fn) {
+  let mounted = false;
+  const on = () => {
+    if (el.isConnected) mounted = true;
+    else if (mounted) { window.removeEventListener('online', on); window.removeEventListener('offline', on); return; }
+    fn();
+  };
+  window.addEventListener('online', on);
+  window.addEventListener('offline', on);
+  fn();
+}
+
 // ---------- Markdown + KaTeX ----------
 if (window.marked) marked.setOptions({ gfm: true, breaks: true });
 const escHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // Markdown mangles LaTeX (underscores, backslashes, pipes), so math is swapped for
 // placeholders before marked runs and put back afterwards, then KaTeX renders it.
+// Display math: $$...$$. Inline math: $...$ only when the character after the opening $ is not whitespace, the character before
+// the closing $ is not whitespace, and the closing $ is not directly followed by a digit. So "$5 and $10" stays plain text.
+const DISPLAY_MATH = /\$\$[\s\S]+?\$\$/g;
+const INLINE_MATH = /\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\d)/g;
 export function renderMd(el, md, inline = false) {
   const math = [];
   const tok = m => { math.push(m); return `MATHTOKEN${math.length - 1}ENDTOKEN`; };
-  const src = String(md || '').replace(/\$\$[\s\S]+?\$\$/g, tok).replace(/\$[^$\n]+?\$/g, tok);
+  // Accepted inline math is handed to KaTeX as \(...\), so a leftover lone $ in the text can never be mistaken for a formula.
+  const src = String(md || '').replace(DISPLAY_MATH, tok).replace(INLINE_MATH, (_, m) => tok('\\(' + m + '\\)'));
   let html = inline ? marked.parseInline(src) : marked.parse(src);
   html = html.replace(/MATHTOKEN(\d+)ENDTOKEN/g, (_, i) => escHtml(math[+i]));
   el.innerHTML = DOMPurify.sanitize(html);
   if (window.renderMathInElement) {
     renderMathInElement(el, {
-      delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }],
+      delimiters: [{ left: '$$', right: '$$', display: true }, { left: '\\(', right: '\\)', display: false }],
       throwOnError: false
     });
   }

@@ -92,11 +92,14 @@ export async function reviewQueue(chapterId) {
       fields = [f('Question', q), f('Model answer', m), f('Key points (one per line)', k)];
       collect = () => ({ q: q.value.trim(), modelAnswer: m.value.trim(), keyPoints: k.value.split('\n').map(s => s.trim()).filter(Boolean) });
     }
-    const save = () => {
+    const save = async () => {
       const d = collect();
       const empty = Object.entries(d).some(([k, v]) => k === 'explanation' ? false : Array.isArray(v) ? !v.length || v.some(x => !x) : typeof v === 'string' && !v);
       if (empty) { err.textContent = 'Fill in every field (only the explanation may be empty).'; err.hidden = false; return; }
-      db.updateItem(it.kind, it.id, d).catch(fail);
+      // Document ids are a hash of the ORIGINAL text and never change. Remember the hash of the new wording too, so importing
+      // either the original or the edited wording again is skipped as a duplicate.
+      const alias = await db.sha256(it.chapterId + '|' + db.norm(it.kind === 'flashcards' ? d.front : d.q));
+      db.updateItem(it.kind, it.id, d, alias === it.id ? null : alias).catch(fail);
       Object.assign(it, d); draw();
     };
     return [h('div', { class: 'card' }, fields, err),

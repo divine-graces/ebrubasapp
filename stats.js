@@ -5,9 +5,8 @@ import * as db from './db.js';
 const band = pct => pct >= 80 ? 'hi' : pct >= 50 ? 'mid' : 'lo';
 
 async function courseStats(courseId) {
-  const [chapters, qs, allCards, attempts] = await Promise.all([db.listChapters(courseId), db.listQuestions(courseId), db.listCards(courseId), db.listAttempts(courseId)]);
-  const approved = qs.filter(q => q.status === 'approved');
-  const cards = allCards.filter(c => c.status === 'approved');
+  // approved items of the selected course only (pending ones were never part of these numbers)
+  const [chapters, approved, cards, attempts] = await Promise.all([db.listChapters(courseId), db.listApprovedQuestions(courseId), db.listApprovedCardsOf(courseId), db.listAttempts(courseId)]);
   const rows = chapters.map(c => {
     const own = approved.filter(q => q.chapterId === c.id);
     const seen = own.reduce((n, q) => n + (q.stats?.seen || 0), 0);
@@ -27,7 +26,8 @@ async function courseStats(courseId) {
       h('div', { class: 'bar', style: `height:${n ? Math.max(4, Math.round((n / maxBox) * 70)) : 3}px;${n ? '' : 'opacity:.25'}` }),
       h('span', {}, i === 0 ? 'New' : 'Box ' + i))))) : null;
 
-  // score history: the last 10 finished tests, newest first
+  // score history: the last 10 finished tests, newest first. Retake runs (a.retake) are listed with a chip but are NOT part of any
+  // score average: they only contain the questions you missed. (Overall accuracy comes from question stats, which retakes do update.)
   const recent = attempts.filter(a => a.total > 0).slice(0, 10);
   const when = t => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   const histCard = recent.length ? h('div', { class: 'card' },
@@ -36,7 +36,7 @@ async function courseStats(courseId) {
       const p = Math.round((a.score / a.total) * 100);
       return h('div', { class: 'hist' },
         h('div', { class: 'between' },
-          h('span', {}, h('span', { class: 'chip' }, a.type === 'theory' ? 'Theory' : 'MCQ'), ' ', when(a.date)),
+          h('span', {}, h('span', { class: 'chip' }, a.type === 'theory' ? 'Theory' : 'MCQ'), a.retake ? ' ' : null, a.retake ? h('span', { class: 'chip' }, 'Retake') : null, ' ', when(a.date)),
           h('span', {}, h('span', { class: `pct ${band(p)}` }, p + '%'), h('span', { class: 'muted small' }, `  ${a.score}/${a.total}${a.type === 'theory' ? ' got it' : ''}`))),
         h('div', { class: `meter ${band(p)}` }, h('div', { style: `width:${p}%` })));
     })) : null;

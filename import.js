@@ -1,5 +1,5 @@
 // import.js: paste JSON, validate, preview, skip duplicates, save.
-import { h, topbar, toast, loading, emptyState } from './ui.js';
+import { h, topbar, toast, loading, emptyState, watchOnline } from './ui.js';
 import * as db from './db.js';
 
 const stats0 = () => ({ seen: 0, correct: 0, streak: 0, lastResult: null, lastSeenAt: null });
@@ -105,10 +105,11 @@ export async function importScreen() {
   if (!courses.length) return h('div', {}, topbar('Import'), emptyState('courses', 'Create a course first, then come back to import.', h('a', { class: 'btn primary', href: '#/' }, 'Go to Courses')));
 
   let chapters = [], prev = null, touched = false, mode = 'append';
+  let saveBtn = null, busy = false, saving = false; // busy = preview running, saving = save running
   const pre = sessionStorage.getItem('importCourse'); sessionStorage.removeItem('importCourse');
 
   const out = h('div');
-  const invalidate = () => { prev = null; out.replaceChildren(); };
+  const invalidate = () => { prev = null; saveBtn = null; out.replaceChildren(); };
   const showErr = list => out.replaceChildren(h('div', { class: 'card' }, h('b', {}, 'Cannot import yet'), list.map(e => h('p', { class: 'err' }, e))));
 
   const courseSel = h('select', {}, h('option', { value: '' }, 'Choose a course…'), courses.map(c => h('option', { value: c.id }, c.name + (c.code ? ` (${c.code})` : ''))));
@@ -117,6 +118,14 @@ export async function importScreen() {
   const paste = h('textarea', { rows: 9, class: 'mono', placeholder: 'Paste the JSON from Claude here' });
   const verified = h('input', { type: 'checkbox' });
   const previewBtn = h('button', { class: 'btn primary block' }, 'Preview');
+  const offMsg = h('p', { class: 'err small', hidden: true }, 'Connect to the internet to import.');
+  // Preview and Save need the server (duplicate check), so they are disabled while offline or while running.
+  const sync = () => {
+    const on = navigator.onLine;
+    previewBtn.disabled = !on || busy;
+    if (saveBtn) saveBtn.disabled = !on || saving;
+    offMsg.hidden = on;
+  };
 
   const keyOf = c => c.nameKey || db.norm(c.name || '');
 
@@ -161,8 +170,9 @@ export async function importScreen() {
   } }, 'Paste from clipboard');
 
   previewBtn.onclick = async () => {
+    if (!navigator.onLine) return sync();
     try {
-      previewBtn.disabled = true; out.replaceChildren(loading());
+      busy = true; sync(); out.replaceChildren(loading());
       if (!courseSel.value) return showErr(['Pick a course first.']);
       await chapsP;
       if (!paste.value.trim()) return showErr(['Paste the JSON first.']);
@@ -236,7 +246,8 @@ export async function importScreen() {
       const upd = () => { status.textContent = 'Saving as: ' + (verified.checked ? 'approved (verified)' : 'pending'); };
       verified.onchange = upd; upd();
       const nothing = noteBody == null && !fresh.length;
-      const saveBtn = h('button', { class: 'btn primary block', onclick: save }, 'Save');
+      saveBtn = h('button', { class: 'btn primary block', onclick: save }, 'Save');
+      sync();
       out.replaceChildren(h('div', { class: 'card' },
         h('div', { class: 'muted small' }, `Chapter: ${name} (${existing ? 'existing' : 'new'})`),
         renamed ? h('div', { class: 'small', style: 'color:var(--warn)' }, `A chapter you renamed to '${name}' already uses this name. Importing into it.`) : null,
@@ -244,12 +255,13 @@ export async function importScreen() {
         h('p', { class: 'title' }, nothing ? 'Nothing new to save. ' + parts.join(', ') : parts.join(', ')),
         nothing ? null : [status, saveBtn]));
     } catch (e) { console.error(e); showErr(['Something went wrong: ' + (e.message || e)]); }
-    finally { previewBtn.disabled = false; }
+    finally { busy = false; sync(); }
   };
 
   async function save(ev) {
     if (!prev) return;
-    const btn = ev.currentTarget; btn.disabled = true;
+    if (!navigator.onLine) { sync(); return toast('Connect to the internet to import.', 4000); }
+    saving = true; sync();
     try {
       const p = prev, now = Date.now(), status = verified.checked ? 'approved' : 'pending';
       const docs = p.items.map(i => ({ ...i, data: { ...i.data, status, createdAt: now, ...(i.col === 'flashcards' ? { srs: { ...i.data.srs, dueAt: now } } : {}) } }));
@@ -264,7 +276,8 @@ export async function importScreen() {
       const chapterData = existing
         ? { updatedAt: now, ...(noteBody != null ? { noteBody } : {}) } // noteBody only when the import brings a note
         : { courseId: p.courseId, name: p.name, nameKey: p.key, order: p.order, noteBody: noteBody ?? '', createdAt: now, updatedAt: now };
-      await db.saveImport(p.chapterId, chapterData, docs);
+      const res = await db.saveImport(p.chapterId, chapterData, docs); // skips anything already on the server
+      const saved = res.written.length;
 
       paste.value = ''; verified.checked = false; touched = false; prev = null; // the verified box never carries over
       await loadChaps(p.chapterId);
@@ -275,14 +288,18 @@ export async function importScreen() {
       }
       out.replaceChildren(h('div', { class: 'card' },
         h('p', { class: 'ok title' }, `Saved to ${nm} as ${status}.`),
+        res.skipped ? h('p', { class: 'muted small' }, `${res.skipped} already existed and ${res.skipped === 1 ? 'was' : 'were'} left unchanged.`) : null,
         h('div', { class: 'row' },
-          docs.length && status === 'pending' ? h('a', { class: 'btn primary', href: '#/review/' + p.chapterId }, `Review ${docs.length}`) : null,
+          saved && status === 'pending' ? h('a', { class: 'btn primary', href: '#/review/' + p.chapterId }, `Review ${saved}`) : null,
           h('a', { class: 'btn', href: '#/chapter/' + p.chapterId }, 'Open chapter'))));
       toast('Saved');
-    } catch (e) { console.error(e); btn.disabled = false; toast('Save failed: ' + (e.message || e), 5000); }
+    } catch (e) {
+      console.error(e);
+      toast(e.offline ? e.message : 'Save failed: ' + (e.message || e), 6000);
+    } finally { saving = false; sync(); }
   }
 
-  return h('div', {},
+  const root = h('div', {},
     topbar('Import'),
     h('label', { class: 'field' }, h('span', {}, 'Course'), courseSel),
     h('label', { class: 'field' }, h('span', {}, 'Chapter'), chapSel, newName),
@@ -290,5 +307,7 @@ export async function importScreen() {
     h('label', { class: 'field' }, h('span', {}, 'JSON'), paste),
     clip,
     h('label', { class: 'check' }, verified, 'Already verified, skip review'),
-    previewBtn, out);
+    previewBtn, offMsg, out);
+  watchOnline(root, sync); // re-checks on the online/offline events and once now
+  return root;
 }

@@ -14,9 +14,12 @@ let session = null;
 const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(session)); } catch { /* storage full or blocked */ } };
 const restore = () => { if (!session) { try { session = JSON.parse(localStorage.getItem(KEY)); } catch { session = null; } } return session; };
 const clear = () => { session = null; try { localStorage.removeItem(KEY); } catch { /* ignore */ } };
+// Called on sign out: forget the test in progress and its draft answers, in memory and on this device.
+export const resetTheorySession = clear;
 
-const newSession = (courseId, qs) => ({
-  courseId,
+// retake = a "Retake missed and partial" run: stats update as normal, but the saved attempt is marked so history can set it apart
+const newSession = (courseId, qs, retake = false) => ({
+  courseId, retake,
   qs: qs.map(q => ({ id: q.id, chapterId: q.chapterId, q: q.q, modelAnswer: q.modelAnswer, keyPoints: q.keyPoints })),
   i: 0, answers: qs.map(() => null), drafts: qs.map(() => ''), finished: false, saved: false,
   chapterIds: [...new Set(qs.map(q => q.chapterId))]
@@ -55,7 +58,7 @@ export function theoryScreen() {
     s.finished = true; s.score = res.filter(r => r.rating === 'got').length; s.total = res.length;
     if (!s.saved && res.length) {
       s.saved = true;
-      db.saveAttempt({ courseId: s.courseId, chapterIds: s.chapterIds, type: 'theory', date: Date.now(), score: s.score, total: s.total, results: res }).catch(fail);
+      db.saveAttempt({ courseId: s.courseId, chapterIds: s.chapterIds, type: 'theory', date: Date.now(), score: s.score, total: s.total, results: res, ...(s.retake ? { retake: true } : {}) }).catch(fail);
     }
     persist(); draw();
   };
@@ -122,7 +125,7 @@ export function theoryScreen() {
     const pct = s.total ? Math.round((got / s.total) * 100) : 0;
     const weak = s.qs.map((q, i) => ({ q, a: s.answers[i] })).filter(x => x.a && x.a.rating !== 'got');
     const retake = () => {
-      session = newSession(s.courseId, shuffle(weak.map(x => x.q)));
+      session = newSession(s.courseId, shuffle(weak.map(x => x.q)), true);
       persist(); draw();
     };
     return [
